@@ -20,6 +20,14 @@ ROLES = ['A', 'B']
 
 st.title("Analyse temporelle des réactions")
 
+st.write("RACINE =", RACINE)
+st.write("CACHE_DIR =", CACHE_DIR)
+st.write("CACHE_DIR existe ?", CACHE_DIR.exists())
+if CACHE_DIR.exists():
+    st.write("Contenu du dossier :", [p.name for p in CACHE_DIR.iterdir()][:20])
+    st.write("Nb .parquet :", len(list(CACHE_DIR.glob("*.parquet"))))
+    st.write("Nb BB_*.parquet :", len(list(CACHE_DIR.glob("BB_*.parquet"))))
+
 # ============================================================
 # CHARGEMENT
 # ============================================================
