@@ -10,7 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import io
-from REACTIONS.traitement_fichier import enrichir_dataframe
+from traitement_fichier import enrichir_dataframe
 
 st.cache_data.clear()
 
