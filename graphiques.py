@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 # --- Ajouter la racine au PYTHONPATH ---
-RACINE = Path(__file__).resolve().parent
+RACINE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE))
 
 import streamlit as st
@@ -10,6 +10,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import io
+from GSV.stats_condition import detecter_ruptures_contact
+from REACTIONS.traitement_fichier import enrichir_caches, enrichir_dataframe
 
 st.cache_data.clear()
 
@@ -73,31 +75,6 @@ def lister_evenements(essai, type_event):
         idx_events = list(idx_ruptures) + list(idx_reprises)
     
     return ['Tous'] + list(range(len(idx_events)))
-
-
-def detecter_ruptures_contact(df: pd.DataFrame, col_contact: str,
-                               col_temps: str = "temps_relatif_ms",
-                               duree_min_ms: float = 0) -> tuple[np.ndarray, np.ndarray]:
-    diff = df[col_contact].diff()
-    idx_ruptures = df.index[diff == -1].tolist()
-    idx_reprises = df.index[diff == 1].tolist()
-
-    temps = pd.to_numeric(df[col_temps], errors='coerce').to_numpy()
-
-    ruptures_valides = []
-    reprises_valides = []
-
-    for idx_r in idx_ruptures:
-        suivant = next((i for i in idx_reprises if i > idx_r), None)
-        fin_idx = suivant if suivant is not None else len(df) - 1
-        duree_ms = temps[fin_idx] - temps[idx_r]
-
-        if duree_ms >= duree_min_ms:
-            ruptures_valides.append(idx_r)
-            if suivant is not None:
-                reprises_valides.append(suivant)
-
-    return np.array(ruptures_valides), np.array(reprises_valides)
 
 
 def comparer_courbes(donnees, cles, fenetre_avant):
@@ -250,6 +227,10 @@ echantillon = st.sidebar.slider("Echantillonage (ms)", 10, 500, 100, 10)
 fenetre_avant = st.sidebar.slider("Fenêtre avant (ms)", 100, 1000, 500, 100)
 fenetre_apres = st.sidebar.slider("Fenêtre après (ms)", 500, 3000, 1500, 100)
 
+# Pas direction
+previous_pas = 20
+pas_direction = st.sidebar.slider("Fenêtre glissante d'enregistrement de la vitesse (ms)", 50, 500, 200, 10) /10
+
 # ============================================================
 # EXTRACTION DES FENÊTRES
 # ============================================================
@@ -257,7 +238,7 @@ fenetre_apres = st.sidebar.slider("Fenêtre après (ms)", 500, 3000, 1500, 100)
 @st.cache_data
 def extraire_fenetres(conditions_tuple, positions_tuple, type_events_tuple,
                        roles_tuple, essai_filtre, evenement_filtre,
-                       fenetre_avant_ms, fenetre_apres_ms, grouper_par):
+                       fenetre_avant_ms, fenetre_apres_ms, grouper_par, pas_direction):
     
     conditions_list = conditions_tuple[0]
     positions_list = positions_tuple[0]
@@ -270,7 +251,11 @@ def extraire_fenetres(conditions_tuple, positions_tuple, type_events_tuple,
     donnees = {}
     
     for cond in conditions_list:
-        for fichier in CACHE_DIR.glob(f"{cond}_*.parquet"):
+        fichiers = list(CACHE_DIR.glob(f"{cond}_*.parquet"))
+        if not fichiers:
+            print(f"aucun fichier pour {cond}")
+            continue
+        for fichier in fichiers:
             nom = fichier.stem.replace(f"{cond}_", "")
             if essai_filtre != 'Tous' and nom != essai_filtre:
                 continue
@@ -278,6 +263,10 @@ def extraire_fenetres(conditions_tuple, positions_tuple, type_events_tuple,
             df = pd.read_parquet(fichier)
             if 'contact_AB' not in df.columns:
                 continue
+            
+            # Recalcul en mémoire des colonnes enrichies avec le pas_direction choisi
+            for pos in positions_list:
+                df = enrichir_dataframe(df, pos, pas_direction)
             
             idx_ruptures, idx_reprises = detecter_ruptures_contact(
                 df, 'contact_AB', col_temps='temps_relatif_ms'
@@ -382,7 +371,8 @@ donnees = extraire_fenetres(
     evenement,
     fenetre_avant,
     fenetre_apres,
-    grouper_par
+    grouper_par,
+    pas_direction
 )
 
 # --- Dictionnaire de traduction pour l'affichage ---
