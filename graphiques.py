@@ -427,25 +427,6 @@ else:
     
     couleurs = {cle: palette[i] for i, cle in enumerate(cles_triees)}
 
-    # ============================================================
-    # AFFICHAGE DES MOYENNES DES PROCHAINS ÉVÉNEMENTS (barre latérale)
-    # ============================================================
-    st.sidebar.header("Prochains événements")
-    if evenement != 'Tous':
-        for cle in cles_triees:
-            data = donnees[cle]
-            deux_prochains = data['deux_prochains']
-            
-            temps_1 = [t[0] for t in deux_prochains if t[0] is not None]
-            temps_2 = [t[1] for t in deux_prochains if t[1] is not None]
-            
-            if temps_1:
-                st.sidebar.write(f"Prochain évènement contraire: {np.mean(temps_1):.0f} ms")
-            if temps_2:
-                st.sidebar.write(f"Prochain même évènement : {np.mean(temps_2):.0f} ms")
-    else:
-        st.sidebar.write("Sélectionnez un essai unique pour voir les temps moyens.")
-
     # --- Figure ---
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
     
@@ -559,7 +540,7 @@ else:
                 moy_2 = np.mean(temps_2)
                 ax1.axvline(moy_2, color=couleur, linestyle=':',
                             alpha=0.6, linewidth=1.5,
-                            label=f'Prochain même évènemen')
+                            label=f'Prochain même évènement')
                 ax2.axvline(moy_2, color=couleur, linestyle=':',
                             alpha=0.6, linewidth=1.5)
 
