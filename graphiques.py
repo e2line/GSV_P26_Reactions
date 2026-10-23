@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 # --- Ajouter la racine au PYTHONPATH ---
-RACINE = Path(__file__).resolve().parent.parent
+RACINE = Path(__file__).resolve().parent
 sys.path.insert(0, str(RACINE))
 
 import streamlit as st
