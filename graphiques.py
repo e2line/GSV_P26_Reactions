@@ -447,7 +447,7 @@ else:
         st.sidebar.write("Sélectionnez un essai unique pour voir les temps moyens.")
 
     # --- Figure ---
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(25, 20), sharex=True)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
     
     # --- Boucle sur les groupes ---
     for cle in cles_triees:
@@ -573,13 +573,13 @@ else:
     ax1.set_ylabel('Accélération (px/ms²)', fontsize=12)
     ax1.set_title('Accélération', fontsize=13)
     ax1.grid(True, alpha=0.3)
-    ax1.legend(loc='upper right', fontsize=20)
+    ax1.legend(loc='upper right', fontsize=15)
     
     ax2.set_ylabel('Vitesse signée (px/ms)', fontsize=12)
     ax2.set_xlabel('Temps relatif (ms)', fontsize=12)
     ax2.set_title('Vitesse signée', fontsize=13)
     ax2.grid(True, alpha=0.3)
-    ax2.legend(loc='upper right', fontsize=20)
+    ax2.legend(loc='upper right', fontsize=15)
 
     # --- Ajustement des limites Y ---
     def ajuster_limites(ax, marge=0.05):
