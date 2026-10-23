@@ -245,16 +245,15 @@ if essai != 'Tous' and (rupture or reprise):
     evenement = st.sidebar.selectbox("Événement :", evenements_disponibles)
 
 # Echantillonage
-echantillon = st.sidebar.slider("Echantillonage (ms)", 10, 500, 100, 10)
+if mode_affichage == "Nuage de points":
+    echantillon = st.sidebar.slider("Echantillonage (ms)", 10, 500, 100, 10, help="Temps entre les différents enregistrements")
 
 # Fenêtre
-fenetre_avant = st.sidebar.slider("Fenêtre avant (ms)", 100, 1000, 500, 100)
-fenetre_apres = st.sidebar.slider("Fenêtre après (ms)", 500, 3000, 1500, 100)
+fenetre_avant = st.sidebar.slider("Fenêtre avant (ms)", 100, 1000, 500, 100, help="Fenêtre de temps affichée avant l'évènement sur le graphique")
+fenetre_apres = st.sidebar.slider("Fenêtre après (ms)", 500, 3000, 1500, 100, help="Fenêtre de temps affichée après l'évènement sur le graphique")
 
-# Pas direction (AJOUT)
-pas_direction = st.sidebar.slider(
-    "Fenêtre glissante d'enregistrement de la vitesse (ms)", 50, 500, 200, 10
-) / 10
+# Pas direction
+pas_direction = st.sidebar.slider("Fenêtre glissante d'enregistrement de la vitesse (ms)", 50, 500, 200, 10, help="Temps entre les enregistrements des positions d'un individu pour le calcul de la vitesse") /10
 
 # ============================================================
 # EXTRACTION DES FENÊTRES
