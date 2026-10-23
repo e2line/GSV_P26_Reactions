@@ -447,7 +447,7 @@ else:
         st.sidebar.write("Sélectionnez un essai unique pour voir les temps moyens.")
 
     # --- Figure ---
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(25, 20), sharex=True)
     
     # --- Boucle sur les groupes ---
     for cle in cles_triees:
