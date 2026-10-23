@@ -573,13 +573,13 @@ else:
     ax1.set_ylabel('Accélération (px/ms²)', fontsize=12)
     ax1.set_title('Accélération', fontsize=13)
     ax1.grid(True, alpha=0.3)
-    ax1.legend(loc='upper right', fontsize=8)
+    ax1.legend(loc='upper right', fontsize=20)
     
     ax2.set_ylabel('Vitesse signée (px/ms)', fontsize=12)
     ax2.set_xlabel('Temps relatif (ms)', fontsize=12)
     ax2.set_title('Vitesse signée', fontsize=13)
     ax2.grid(True, alpha=0.3)
-    ax2.legend(loc='upper right', fontsize=8)
+    ax2.legend(loc='upper right', fontsize=20)
 
     # --- Ajustement des limites Y ---
     def ajuster_limites(ax, marge=0.05):
@@ -594,7 +594,7 @@ else:
     ajuster_limites(ax2)
     
     plt.tight_layout()
-    st.pyplot(fig)
+    st.pyplot(fig, width="stretch")
 
     # Bouton pour enregistrer
     buf = io.BytesIO()
