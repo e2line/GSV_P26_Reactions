@@ -548,6 +548,7 @@ else:
             temps_2 = [t[1] for t in deux_prochains if t[1] is not None]
         
             if temps_1:
+                moy_1 = np.mean(temps_1)
                 ax1.axvline(moy_1, color=couleur, linestyle='--',
                             alpha=0.6, linewidth=1.5,
                             label=f'Prochain évènement contraire')
@@ -555,6 +556,7 @@ else:
                             alpha=0.6, linewidth=1.5)
             
             if temps_2:
+                moy_2 = np.mean(temps_2)
                 ax1.axvline(moy_2, color=couleur, linestyle=':',
                             alpha=0.6, linewidth=1.5,
                             label=f'Prochain même évènemen')
