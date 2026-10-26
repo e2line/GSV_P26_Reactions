@@ -398,7 +398,7 @@ def extraire_fenetres(conditions_tuple_gsv, conditions_tuple_gg, positions_tuple
                             if not type_events_tuple[1]:
                                 groupes.append(te)
                             if not roles_tuple[1]:
-                                groupes.append(r))
+                                groupes.append(r)
                             
                             cle = '_'.join(groupes) if groupes else ''
                             
