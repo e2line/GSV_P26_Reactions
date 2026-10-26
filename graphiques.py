@@ -162,30 +162,60 @@ rr = st.sidebar.checkbox('Souris-Souris', False)
 rt = st.sidebar.checkbox('Souris guide-Curseur suiveur', False)
 tr = st.sidebar.checkbox('Curseur guide-Souris suiveur', False)
 
-st.sidebar.subheader("Rôles (défaut=Tous)")
-guide = st.sidebar.checkbox('Guide', False)
-suiveur = st.sidebar.checkbox('Suiveur', False)
+st.sidebar.subheader("Mode de jeu")
+gsv = st.sidebar.checkbox('Guide-Suiveur')
+gg = st.sidebar.checkbox('Guide-Guide')
+
+if gsv and not gg:
+    st.sidebar.subheader("Rôles (défaut=Tous)")
+    role1 = st.sidebar.checkbox('Guide', False)
+    role2 = st.sidebar.checkbox('Suiveur', False)
+elif gg and not gsv:
+    st.sidebar.subheader("Individus (défaut=Tous)")
+    role1 = st.sidebar.checkbox('Guide A', False)
+    role2 = st.sidebar.checkbox('Guide B', False)
+
 
 st.sidebar.subheader("Conditions (défaut=Toutes)")
-bb = st.sidebar.checkbox('BB', False)
-bh = st.sidebar.checkbox('BH', False)
-hb = st.sidebar.checkbox('HB', False)
-hh = st.sidebar.checkbox('HH', False)
+if gsv or not gg:
+    bb = st.sidebar.checkbox('BB', False)
+    bh = st.sidebar.checkbox('BH', False)
+    hb = st.sidebar.checkbox('HB', False)
+    hh = st.sidebar.checkbox('HH', False)
+if gg or not gsv:
+    gb = st.sidebar.checkbox('Guide-Guide B', False)
+    gh = st.sidebar.checkbox('Guide-Guide H', False)
+
 
 # ============================================================
 # FILTRAGE
 # ============================================================
 
-conditions_list = []
-if bb: conditions_list.append('BB')
-if bh: conditions_list.append('BH')
-if hb: conditions_list.append('HB')
-if hh: conditions_list.append('HH')
-if conditions_list == []:
-    conditions_list = CONDITIONS
-    conditions_tuple = (conditions_list, True)
+conditions_list_gsv = []
+if gsv:
+    if bb: conditions_list_gsv.append('BB')
+    if bh: conditions_list_gsv.append('BH')
+    if hb: conditions_list_gsv.append('HB')
+    if hh: conditions_list_gsv.append('HH')
+    if conditions_list_gsv == []:
+        conditions_list_gsv = ['BB', 'BH', 'HB', 'HH']
+        conditions_tuple_gsv = (conditions_list_gsv, True)
+    else:
+        conditions_tuple_gsv = (conditions_list_gsv, False)
 else:
-    conditions_tuple = (conditions_list, False)
+    conditions_tuple_gsv = (conditions_list_gsv, True)
+
+conditions_list_gg = []
+if gg:
+    if gb: conditions_list_gg.append('GB')
+    if gh: conditions_list_gg.append('GH')
+    if conditions_list_gg == []:
+        conditions_list_gg = ['GB', 'GH']
+        conditions_tuple_gg = (conditions_list_gg, True)
+    else:
+        conditions_tuple_gg = (conditions_list_gg, False)
+else:
+    conditions_tuple_gg = (conditions_list_gg, True)
 
 positions_list = []
 if tt: positions_list.append('tt')
@@ -207,28 +237,20 @@ elif reprise:
 else:
     type_events_tuple = (TYPES_EVENTS, True)
 
-if guide:
-    if suiveur:
-        roles_tuple = (ROLES, False)
-    else:
-        roles_tuple = (['A'], False)
-elif suiveur:
-    roles_tuple = (['B'], False)
+if (gsv and not gg) or (gg and not gsv):
+    if role1:
+        if role2:
+            roles_tuple = (ROLES, False)
+        else:
+            roles_tuple = (['A'], False)
+    elif role2:
+        roles_tuple = (['B'], False)
+    else : roles_tuple = (ROLES, True)
 else:
     roles_tuple = (ROLES, True)
 
-# Grouper par
-grouper_par = []
-if not type_events_tuple[1] and len(type_events_tuple[0]) > 1:
-    grouper_par.append('type_event')
-if not positions_tuple[1] and len(positions_tuple[0]) > 1:
-    grouper_par.append('position')
-if not roles_tuple[1] and len(roles_tuple[0]) > 1:
-    grouper_par.append('role')
-if not conditions_tuple[1] and len(conditions_tuple[0]) > 1:
-    grouper_par.append('condition')
-
 # Essai
+conditions_list = conditions_list_gsv + conditions_list_gg 
 if conditions_list == CONDITIONS:
     essais_disponibles = ['Tous'] + sorted(df_essais['essai'].unique().tolist())
 else:
@@ -253,33 +275,37 @@ fenetre_avant = st.sidebar.slider("Fenêtre avant (ms)", 100, 1000, 500, 100, he
 fenetre_apres = st.sidebar.slider("Fenêtre après (ms)", 500, 3000, 1500, 100, help="Fenêtre de temps affichée après l'évènement sur le graphique")
 
 # Pas direction
-pas_direction = st.sidebar.slider("Fenêtre glissante d'enregistrement de la vitesse (ms)", 50, 500, 200, 10, help="Temps entre les enregistrements des positions d'un individu pour le calcul de la vitesse") /10
+pas_direction = st.sidebar.slider("Fenêtre glissante d'enregistrement de la vitesse (ms)", 40, 500, 200, 20, help="Temps entre les enregistrements des positions d'un individu pour le calcul de la vitesse") //10
 
 # ============================================================
 # EXTRACTION DES FENÊTRES
 # ============================================================
 
 @st.cache_data
-def extraire_fenetres(conditions_tuple, positions_tuple, type_events_tuple,
+def extraire_fenetres(conditions_tuple_gsv, conditions_tuple_gg, positions_tuple, type_events_tuple,
                        roles_tuple, essai_filtre, evenement_filtre,
-                       fenetre_avant_ms, fenetre_apres_ms, grouper_par, pas_direction):
+                       fenetre_avant_ms, fenetre_apres_ms, pas_direction):
 
-    conditions_list = conditions_tuple[0]
+    conditions_list = conditions_tuple_gsv[0] + conditions_tuple_gg[0]
+    if len(conditions_list) == 0:
+        conditions_list = CONDITIONS
     positions_list = positions_tuple[0]
     type_events_list = type_events_tuple[0]
     roles_list = roles_tuple[0]
-
+    
     n_avant = int(fenetre_avant_ms / 10)
     n_apres = int(fenetre_apres_ms / 10)
-
+    
     donnees = {}
-
+    
     for cond in conditions_list:
-        for fichier in CACHE_DIR.glob(f"{cond}_*.parquet"):
+        fichiers = list(CACHE_DIR.glob(f"{cond}_*.parquet"))
+            
+        for fichier in fichiers:
             nom = fichier.stem.replace(f"{cond}_", "")
             if essai_filtre != 'Tous' and nom != essai_filtre:
                 continue
-
+            
             df = pd.read_parquet(fichier)
             if 'contact_AB' not in df.columns:
                 continue
@@ -287,7 +313,7 @@ def extraire_fenetres(conditions_tuple, positions_tuple, type_events_tuple,
             # Recalcul en mémoire des colonnes enrichies avec le pas_direction choisi
             for pos in positions_list:
                 df = enrichir_dataframe(df, pos, pas_direction)
-
+            
             idx_ruptures, idx_reprises = detecter_ruptures_contact(
                 df, 'contact_AB', col_temps='temps_relatif_ms'
             )
@@ -296,17 +322,17 @@ def extraire_fenetres(conditions_tuple, positions_tuple, type_events_tuple,
                 [(idx, 'reprise') for idx in idx_reprises]
             )
             tous_les_evenements.sort()
-
+            
             for pos in positions_list:
                 for te in type_events_list:
                     idx_events = idx_ruptures if te == 'rupture' else idx_reprises
-
+                    
                     if evenement_filtre != 'Tous':
                         if evenement_filtre < len(idx_events):
                             idx_events = [idx_events[evenement_filtre]]
                         else:
                             idx_events = []
-
+                    
                     for r in roles_list:
                         if r == 'A':
                             col_acc = f'acc_A_vers_B_{pos}'
@@ -314,21 +340,21 @@ def extraire_fenetres(conditions_tuple, positions_tuple, type_events_tuple,
                         else:
                             col_acc = f'acc_B_vers_A_{pos}'
                             col_v = f'v_signed_B_vers_A_{pos}'
-
+                        
                         if col_acc not in df.columns or col_v not in df.columns:
                             continue
-
+                        
                         for idx in idx_events:
                             if idx - n_avant < 20:
                                 continue
-
+                            
                             idx_debut = max(0, idx - n_avant)
                             idx_fin = min(len(df), idx + n_apres)
                             fenetre = df.iloc[idx_debut:idx_fin]
-
+                            
                             if len(fenetre) < n_avant + 10:
                                 continue
-
+                            
                             # Autres événements
                             autres_evenements = []
                             for idx_autre, type_autre in tous_les_evenements:
@@ -340,23 +366,28 @@ def extraire_fenetres(conditions_tuple, positions_tuple, type_events_tuple,
                                         'temps_relatif_ms': temps_rel,
                                         'type': type_autre,
                                     })
-
+                            
                             # Les deux prochains événements (peu importe le type)
                             prochains = [
                                 idx_autre for idx_autre, _ in tous_les_evenements
                                 if idx_autre > idx
                             ]
                             prochains = sorted(prochains)[:2]
-
+                            
                             deux_prochains = [
                                 (idx_autre - idx) * 10 for idx_autre in prochains
                             ]
                             while len(deux_prochains) < 2:
                                 deux_prochains.append(None)
-
+                            
                             # Groupe
                             groupes = []
-                            if not conditions_tuple[1]:
+                            #if conditions_tuple_gg and not conditions_list_gsv:
+                            if cond in ['BB', 'BH', 'HB', 'HH'] and len(conditions_tuple_gsv[0]) > 1 :
+                                groupes.append('GSV')
+                            if cond in ['GB', 'GH'] and len(conditions_tuple_gg[0]) > 1 :
+                                groupes.append('GG')
+                            if not conditions_tuple_gsv[1] or not conditions_tuple_gg[1]:
                                 groupes.append(cond)
                             if not positions_tuple[1]:
                                 groupes.append(pos)
@@ -364,26 +395,27 @@ def extraire_fenetres(conditions_tuple, positions_tuple, type_events_tuple,
                                 groupes.append(te)
                             if not roles_tuple[1]:
                                 groupes.append(r)
-
+                            
                             cle = '_'.join(groupes) if groupes else ''
-
+                            
                             if cle not in donnees:
                                 donnees[cle] = {
                                     'acc': [], 'v': [],
                                     'autres_evenements': [],
                                     'deux_prochains': [],
                                 }
-
+                            
                             donnees[cle]['acc'].append(fenetre[col_acc].values)
                             donnees[cle]['v'].append(fenetre[col_v].values)
                             donnees[cle]['autres_evenements'].append(autres_evenements)
                             donnees[cle]['deux_prochains'].append(deux_prochains)
-
+    
     return donnees
 
 # Extraire les fenêtres
 donnees = extraire_fenetres(
-    conditions_tuple,
+    conditions_tuple_gsv,
+    conditions_tuple_gg,
     positions_tuple,
     type_events_tuple,
     roles_tuple,
@@ -391,7 +423,6 @@ donnees = extraire_fenetres(
     evenement,
     fenetre_avant,
     fenetre_apres,
-    grouper_par,
     pas_direction
 )
 
@@ -427,41 +458,41 @@ else:
     n_avant = int(fenetre_avant / 10)
 
     cles_triees = sorted(donnees.keys())
-
+    
     if len(cles_triees) <= 10:
         palette = [plt.cm.tab10(i) for i in range(len(cles_triees))]
     elif len(cles_triees) <= 20:
         palette = [plt.cm.tab20(i) for i in range(len(cles_triees))]
     else:
         palette = [plt.cm.turbo(x) for x in np.linspace(0, 1, len(cles_triees))]
-
+    
     couleurs = {cle: palette[i] for i, cle in enumerate(cles_triees)}
 
     # --- Figure ---
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
-
+    
     # --- Boucle sur les groupes ---
     for cle in cles_triees:
         data = donnees[cle]
         fenetres_acc = data['acc']
         fenetres_v = data['v']
-
+        
         if not fenetres_acc:
             continue
-
+        
         # --- Matrices ---
         n_max = max(len(f) for f in fenetres_acc)
         acc_mat = np.full((len(fenetres_acc), n_max), np.nan)
         v_mat = np.full((len(fenetres_v), n_max), np.nan)
-
+        
         for i, (a, v) in enumerate(zip(fenetres_acc, fenetres_v)):
             acc_mat[i, :len(a)] = a
             v_mat[i, :len(v)] = v
-
+        
         # --- Moyennes ---
         acc_moy = np.nanmean(acc_mat, axis=0)
         v_moy = np.nanmean(v_mat, axis=0)
-
+        
         # --- SEM ---
         acc_std = np.nanstd(acc_mat, axis=0)
         v_std = np.nanstd(v_mat, axis=0)
@@ -475,21 +506,21 @@ else:
             v_moy = lisser(v_moy)
             acc_sem = lisser(acc_sem)
             v_sem = lisser(v_sem)
-
+        
         # --- Temps ---
         temps = np.arange(n_max) * 10 - fenetre_avant
-
+        
         # --- Couleur et label ---
         couleur = couleurs[cle]
         label = traduire(cle)
-
+        
         # --- Tracé des courbes ---
         if mode_affichage == 'Courbe':
             ax1.plot(temps, acc_moy, color=couleur, linewidth=2,
                      label=f'{label} (n={len(fenetres_acc)})')
             ax1.fill_between(temps, acc_moy - acc_sem, acc_moy + acc_sem,
                              color=couleur, alpha=0.15)
-
+            
             ax2.plot(temps, v_moy, color=couleur, linewidth=2,
                      label=f'{label} (n={len(fenetres_v)})')
             ax2.fill_between(temps, v_moy - v_sem, v_moy + v_sem,
@@ -499,7 +530,7 @@ else:
             points_temps = []
             points_acc = []
             points_v = []
-
+            
             for a, v in zip(fenetres_acc, fenetres_v):
                 n = len(a)
                 t_fenetre = (np.arange(n) - n_avant) * 10
@@ -512,32 +543,32 @@ else:
                 points_temps = np.array(points_temps)
                 points_acc = np.array(points_acc)
                 points_v = np.array(points_v)
-
+                
                 p1_acc, p99_acc = np.nanpercentile(points_acc, [1, 99])
                 p1_v, p99_v = np.nanpercentile(points_v, [1, 99])
-
+                
                 masque = (
                     (points_acc >= p1_acc) & (points_acc <= p99_acc) &
                     (points_v >= p1_v) & (points_v <= p99_v)
                 )
-
+                
                 points_temps = points_temps[masque]
                 points_acc = points_acc[masque]
                 points_v = points_v[masque]
-
+            
             ax1.scatter(points_temps, points_acc,
                         color=couleur, alpha=0.3, s=5,
                         label=f'{label} (n={len(fenetres_acc)})')
             ax2.scatter(points_temps, points_v,
                         color=couleur, alpha=0.3, s=5,
                         label=f'{label} (n={len(fenetres_v)})')
-
+        
         # --- BARRES VERTICALES DES PROCHAINS ÉVÉNEMENTS ---
         if prochains:
             deux_prochains = data['deux_prochains']
             temps_1 = [t[0] for t in deux_prochains if t[0] is not None]
             temps_2 = [t[1] for t in deux_prochains if t[1] is not None]
-
+        
             if temps_1:
                 moy_1 = np.mean(temps_1)
                 ax1.axvline(moy_1, color=couleur, linestyle='--',
@@ -545,7 +576,7 @@ else:
                             label=f'Prochain évènement contraire')
                 ax2.axvline(moy_1, color=couleur, linestyle='--',
                             alpha=0.6, linewidth=1.5)
-
+            
             if temps_2:
                 moy_2 = np.mean(temps_2)
                 ax1.axvline(moy_2, color=couleur, linestyle=':',
@@ -559,13 +590,13 @@ else:
     ax2.axvline(0, color='red', linestyle='--', alpha=1)
     ax1.axhline(0, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
     ax2.axhline(0, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
-
+    
     # --- Labels ---
     ax1.set_ylabel('Accélération (px/ms²)', fontsize=12)
     ax1.set_title('Accélération', fontsize=13)
     ax1.grid(True, alpha=0.3)
     ax1.legend(loc='upper right', fontsize=12)
-
+    
     ax2.set_ylabel('Vitesse signée (px/ms)', fontsize=12)
     ax2.set_xlabel('Temps relatif (ms)', fontsize=12)
     ax2.set_title('Vitesse signée', fontsize=13)
@@ -583,7 +614,7 @@ else:
 
     ajuster_limites(ax1)
     ajuster_limites(ax2)
-
+    
     plt.tight_layout()
     st.pyplot(fig, width="stretch")
 
@@ -597,15 +628,15 @@ else:
         data=buf,
         mime="image/png"
     )
-
+    
     # ============================================================
     # STATISTIQUES
     # ============================================================
-
+    
     st.subheader("Statistiques")
-
+    
     idx_event = fenetre_avant // 10
-
+    
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Acc avant (px/s²)", f"{np.nanmean(acc_moy[:idx_event]) * 1e6:.2f}")
     col2.metric("Acc après (px/s²)", f"{np.nanmean(acc_moy[idx_event+40:]) * 1e6:.2f}")
