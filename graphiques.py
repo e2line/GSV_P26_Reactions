@@ -383,18 +383,22 @@ def extraire_fenetres(conditions_tuple_gsv, conditions_tuple_gg, positions_tuple
                             # Groupe
                             groupes = []
                             #if conditions_tuple_gg and not conditions_list_gsv:
-                            if cond in ['BB', 'BH', 'HB', 'HH'] and len(conditions_tuple_gsv[0]) > 1 :
-                                groupes.append('GSV')
-                            if cond in ['GB', 'GH'] and len(conditions_tuple_gg[0]) > 1 :
-                                groupes.append('GG')
-                            if not conditions_tuple_gsv[1] or not conditions_tuple_gg[1]:
-                                groupes.append(cond)
+                            if cond in ['BB', 'BH', 'HB', 'HH']:
+                                if len(conditions_tuple_gsv[0]) > 1 and conditions_tuple_gg[1]:
+                                    groupes.append('GSV')
+                                if not conditions_tuple_gsv[1]:
+                                    groupes.append(cond)
+                            if cond in ['GB', 'GH']:
+                                if len(conditions_tuple_gg[0]) > 1  and conditions_tuple_gg[1]:
+                                    groupes.append('GG')
+                                if not conditions_tuple_gg[1]:
+                                    groupes.append(cond)
                             if not positions_tuple[1]:
                                 groupes.append(pos)
                             if not type_events_tuple[1]:
                                 groupes.append(te)
                             if not roles_tuple[1]:
-                                groupes.append(r)
+                                groupes.append(r))
                             
                             cle = '_'.join(groupes) if groupes else ''
                             
