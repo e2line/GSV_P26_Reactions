@@ -119,8 +119,6 @@ def enrichir_dataframe(df, pos='tt', pas_direction=20):
     pos_B = mapping[pos]['B']
 
     df = interpoler_paliers(df, [pos_A, pos_B])
-
-    pas_direction = int(pas_direction)
     
     # Vitesses signées
     df = vitesse_signee(df, pos_A, f'v_signed_A_vers_B_{pos}', 'A', pas_direction)
