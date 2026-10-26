@@ -39,8 +39,8 @@ def vitesse_signee(df, col_pos_source, col_nom, role, pas_direction=20, dt_ms=10
     x_src, y_src = col_pos_source
     
     # Delta de position
-    dx = df[x_src].diff(pas_direction)
-    dy = df[y_src].diff(pas_direction)
+    dx = df[x_src].shift(-pas_direction//2) - df[x_src].shift(pas_direction//2)
+    dy = df[y_src].shift(-pas_direction//2) - df[y_src].shift(pas_direction//2)
     
     # Direction vers la cible
     if role == 'A':
@@ -61,19 +61,24 @@ def vitesse_signee(df, col_pos_source, col_nom, role, pas_direction=20, dt_ms=10
     dt = pas_direction * dt_ms
     df[col_nom] = proj / dt
 
-    # Mettre NaN sur les 20 premières lignes (pas d'historique)
-    df.loc[:19, col_nom] = np.nan
+    # Mettre NaN sur les premières et dernières lignes (pas d'historique)
+    df.loc[:pas_direction//2-1, col_nom] = np.nan
+    df.loc[len(df)-pas_direction//2:, col_nom] = np.nan
     
     return df
 
 
-def acceleration(df, col_vitesse, col_nom,
-                          pas_direction=20, dt_ms=10):
+def acceleration(df, col_vitesse, col_nom, pas_direction=20, dt_ms=10):
     """
     Calcule l'accélération à partir d'une vitesse signée.
     """
+    dv = df[col_vitesse].shift(-pas_direction//2) - df[col_vitesse].shift(pas_direction//2)
     dt = pas_direction * dt_ms
-    df[col_nom] = df[col_vitesse].diff(pas_direction) / dt
+    df[col_nom] = dv / dt
+
+    # Mettre NaN sur les premières et dernières lignes (pas d'historique)
+    df.loc[:pas_direction//2-1, col_nom] = np.nan
+    df.loc[len(df)-pas_direction//2:, col_nom] = np.nan
     return df
 
 
@@ -114,6 +119,8 @@ def enrichir_dataframe(df, pos='tt', pas_direction=20):
     pos_B = mapping[pos]['B']
 
     df = interpoler_paliers(df, [pos_A, pos_B])
+
+    pas_direction = int(pas_direction)
     
     # Vitesses signées
     df = vitesse_signee(df, pos_A, f'v_signed_A_vers_B_{pos}', 'A', pas_direction)
