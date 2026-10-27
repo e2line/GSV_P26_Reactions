@@ -16,7 +16,7 @@ st.cache_data.clear()
 
 # --- Configuration ---
 CACHE_DIR = RACINE / "caches"
-CONDITIONS = ['BB', 'BH', 'HB', 'HH']
+CONDITIONS = ['BB', 'BH', 'HB', 'HH', 'GB', 'GH']
 POSITIONS = ['tt', 'rt', 'tr', 'rr']
 TYPES_EVENTS = ['rupture', 'reprise']
 ROLES = ['A', 'B']
