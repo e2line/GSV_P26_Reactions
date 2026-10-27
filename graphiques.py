@@ -190,7 +190,7 @@ if gg or not gsv:
 # ============================================================
 # FILTRAGE
 # ============================================================
-
+conditions_list = []
 conditions_list_gsv = []
 if gsv:
     if bb: conditions_list_gsv.append('BB')
@@ -216,6 +216,21 @@ if gg:
         conditions_tuple_gg = (conditions_list_gg, False)
 else:
     conditions_tuple_gg = (conditions_list_gg, True)
+
+if conditions_tuple_gsv[1]:
+    conditions_list += conditions_list_gg
+if conditions_tuple_gg[1]:
+    conditions_list += conditions_list_gsv
+
+if gsv or gg:
+    conditions_tuple = (conditions_list, False)
+else :
+    conditions_list = CONDITIONS
+    conditions_tuple = (conditions_list, True)
+
+print(conditions_tuple_gsv)
+print(conditions_tuple_gg)
+print(conditions_tuple)
 
 positions_list = []
 if tt: positions_list.append('tt')
@@ -250,7 +265,6 @@ else:
     roles_tuple = (ROLES, True)
 
 # Essai
-conditions_list = conditions_list_gsv + conditions_list_gg 
 if conditions_list == CONDITIONS:
     essais_disponibles = ['Tous'] + sorted(df_essais['essai'].unique().tolist())
 else:
@@ -282,13 +296,11 @@ pas_direction = st.sidebar.slider("Fenêtre glissante d'enregistrement de la vit
 # ============================================================
 
 @st.cache_data
-def extraire_fenetres(conditions_tuple_gsv, conditions_tuple_gg, positions_tuple, type_events_tuple,
+def extraire_fenetres(conditions_tuple_gsv, conditions_tuple_gg, conditions_tuple, positions_tuple, type_events_tuple,
                        roles_tuple, essai_filtre, evenement_filtre,
                        fenetre_avant_ms, fenetre_apres_ms, pas_direction):
 
-    conditions_list = conditions_tuple_gsv[0] + conditions_tuple_gg[0]
-    if len(conditions_list) == 0:
-        conditions_list = CONDITIONS
+    conditions_list = conditions_tuple[0]
     positions_list = positions_tuple[0]
     type_events_list = type_events_tuple[0]
     roles_list = roles_tuple[0]
@@ -382,14 +394,13 @@ def extraire_fenetres(conditions_tuple_gsv, conditions_tuple_gg, positions_tuple
                             
                             # Groupe
                             groupes = []
-                            #if conditions_tuple_gg and not conditions_list_gsv:
-                            if cond in ['BB', 'BH', 'HB', 'HH']:
-                                if len(conditions_tuple_gsv[0]) > 1 and conditions_tuple_gg[1]:
+                            if cond in conditions_tuple_gsv[0]:
+                                if not conditions_tuple[1]:
                                     groupes.append('GSV')
                                 if not conditions_tuple_gsv[1]:
                                     groupes.append(cond)
-                            if cond in ['GB', 'GH']:
-                                if len(conditions_tuple_gg[0]) > 1  and conditions_tuple_gg[1]:
+                            if cond in conditions_tuple_gg[0]:
+                                if not conditions_tuple[1]:
                                     groupes.append('GG')
                                 if not conditions_tuple_gg[1]:
                                     groupes.append(cond)
@@ -420,6 +431,7 @@ def extraire_fenetres(conditions_tuple_gsv, conditions_tuple_gg, positions_tuple
 donnees = extraire_fenetres(
     conditions_tuple_gsv,
     conditions_tuple_gg,
+    conditions_tuple,
     positions_tuple,
     type_events_tuple,
     roles_tuple,
@@ -442,6 +454,9 @@ LABELS_LISIBLES = {
     'reprise': 'Reprises',
     'BB': 'BB', 'BH': 'BH', 'HB': 'HB', 'HH': 'HH',
 }
+if gg and not gsv:
+    LABELS_LISIBLES['A'] = 'Guide A'
+    LABELS_LISIBLES['B'] = 'Guide B'
 
 def traduire(cle):
     if not cle:
