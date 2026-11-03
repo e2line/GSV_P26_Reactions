@@ -535,15 +535,16 @@ else:
         
         # --- Tracé des courbes ---
         if mode_affichage == 'Courbe':
-            ax1.plot(temps, acc_moy, color=couleur, linewidth=2,
-                     label=f'{label} (n={len(fenetres_acc)})')
-            ax1.fill_between(temps, acc_moy - acc_sem, acc_moy + acc_sem,
-                             color=couleur, alpha=0.15)
-            
-            ax2.plot(temps, v_moy, color=couleur, linewidth=2,
-                     label=f'{label} (n={len(fenetres_v)})')
-            ax2.fill_between(temps, v_moy - v_sem, v_moy + v_sem,
-                             color=couleur, alpha=0.15)
+            if label.find('Souris-Souris') >= 0:
+                ax1.plot(temps, acc_moy, color=couleur, linewidth=2, linestyle='--', label=f'{label} (n={len(fenetres_acc)})')
+                ax2.plot(temps, v_moy, color=couleur, linewidth=2, linestyle='--', label=f'{label} (n={len(fenetres_v)})')
+
+            else :
+                ax1.plot(temps, acc_moy, color=couleur, linewidth=2, label=f'{label} (n={len(fenetres_acc)})')
+                ax2.plot(temps, v_moy, color=couleur, linewidth=2, label=f'{label} (n={len(fenetres_v)})')
+
+            ax1.fill_between(temps, acc_moy - acc_sem, acc_moy + acc_sem, color=couleur, alpha=0.15)
+            ax2.fill_between(temps, v_moy - v_sem, v_moy + v_sem, color=couleur, alpha=0.15)
         else:
             pas = max(1, echantillon // 10)
             points_temps = []
