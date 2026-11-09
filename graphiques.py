@@ -47,14 +47,14 @@ def preparer_donnees(taches_lst, conditions_par_tache, positions_lst, pas_direct
     donnees = {}
     for tache in taches_lst:
         Config.charger_tache(tache)
-        cache_tache = Path(CACHE_DIR)
+        cache_tache = Path(CACHE_DIR/tache)
         if not cache_tache.exists():
             # Construire le cache pour cette tâche
             construire_charger_cache(force_reload=False, tronquer_debut=True)
 
         # Parcourir les conditions demandées
         for cond in conditions_par_tache[tache]:
-            chemin_cond = Path(CACHE_DIR) / cond
+            chemin_cond = Path(CACHE_DIR) /tache / cond
             if not chemin_cond.exists():
                 continue   # condition absente pour cette tâche, on saute
 
