@@ -495,10 +495,10 @@ def extraire_fenetres(_donnees_preparees, taches_tuple, conditions_tuple, positi
                 for r in roles_list:
                     if r == 'A':
                         col_acc = f'acc_A_vers_B_{pos}'
-                        col_v = f'vitesse_A_vers_B_{pos}'
+                        col_v = f'v_signed_A_vers_B_{pos}'
                     else:
                         col_acc = f'acc_B_vers_A_{pos}'
-                        col_v = f'vitesse_B_vers_A_{pos}'
+                        col_v = f'v_signed_B_vers_A_{pos}'
                             
                     if col_acc not in df.columns or col_v not in df.columns:
                         continue
