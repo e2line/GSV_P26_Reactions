@@ -65,7 +65,7 @@ def preparer_donnees(taches_lst, conditions_par_tache, positions_lst, pas_direct
                 essai = fichier.stem
                 df = pd.read_parquet(fichier)
                 for pos in positions_lst:
-                    df = enrichir_dataframe_graphique(df, pos, pas_direction)
+                    df = enrichir_dataframe(df, pos, pas_direction)
                 donnees[(tache, cond, essai)] = df
 
     return donnees
