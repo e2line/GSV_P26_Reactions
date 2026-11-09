@@ -347,16 +347,6 @@ elif len(taches_list) == 1:
 
 
 st.sidebar.subheader("Conditions (défaut=Toutes)")
-"""
-if gs or not gg:
-    bb = st.sidebar.checkbox('BB', False)
-    bh = st.sidebar.checkbox('BH', False)
-    hb = st.sidebar.checkbox('HB', False)
-    hh = st.sidebar.checkbox('HH', False)
-if gg or not gs:
-    gb = st.sidebar.checkbox('Guide-Guide B', False)
-    gh = st.sidebar.checkbox('Guide-Guide H', False)
-"""
 conditions_list = []
 toutes_conditions = []
 conditions_par_tache = {}
@@ -395,47 +385,6 @@ else:
 # ============================================================
 # FILTRAGE
 # ============================================================
-
-"""
-conditions_list = []
-conditions_list_gs = []
-if gs:
-    if bb: conditions_list_gs.append('BB')
-    if bh: conditions_list_gs.append('BH')
-    if hb: conditions_list_gs.append('HB')
-    if hh: conditions_list_gs.append('HH')
-    if conditions_list_gs == []:
-        conditions_list_gs = ['BB', 'BH', 'HB', 'HH']
-        conditions_tuple_gs = (conditions_list_gs, True)
-    else:
-        conditions_tuple_gs = (conditions_list_gs, False)
-else:
-    conditions_tuple_gs = (conditions_list_gs, True)
-
-conditions_list_gg = []
-if gg:
-    if gb: conditions_list_gg.append('GB')
-    if gh: conditions_list_gg.append('GH')
-    if conditions_list_gg == []:
-        conditions_list_gg = ['GB', 'GH']
-        conditions_tuple_gg = (conditions_list_gg, True)
-    else:
-        conditions_tuple_gg = (conditions_list_gg, False)
-else:
-    conditions_tuple_gg = (conditions_list_gg, True)
-
-if conditions_tuple_gs[1]:
-    conditions_list += conditions_list_gg
-if conditions_tuple_gg[1]:
-    conditions_list += conditions_list_gs
-
-if gs or gg:
-    conditions_tuple = (conditions_list, False)
-else:
-    conditions_list = Config.CONDITIONS
-    conditions_tuple = (conditions_list, True)
-"""
-
 positions_list = []
 if tt: positions_list.append('tt')
 if rr: positions_list.append('rr')
