@@ -23,7 +23,7 @@ from traitement_fichier import enrichir_dataframe
 st.cache_data.clear()
 
 # --- Configuration ---
-CACHE_DIR = RACINE / "caches"
+CACHE_DIR = RACINE / "cache"
 CONDITIONS = ['BB', 'BH', 'HB', 'HH', 'GB', 'GH']
 POSITIONS = ['tt', 'rt', 'tr', 'rr']
 TYPES_EVENTS = ['rupture', 'reprise']
