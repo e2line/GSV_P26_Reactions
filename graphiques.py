@@ -449,7 +449,7 @@ donnees_preparees = preparer_donnees(
     tuple(positions_list),
     pas_direction
 )
-st.write(len(donnes_preparees))
+st.write(len(donnees_preparees))
 # ============================================================
 # EXTRACTION DES FENÊTRES
 # ============================================================
