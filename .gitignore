@@ -1,0 +1,7 @@
+__pycache__/
+__init__.py
+*.json
+.venv
+test.py
+*.png
+temp.py
