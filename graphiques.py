@@ -368,10 +368,6 @@ for tache in taches_list:
     conditions_par_tache[tache] = conds_choisies or conds_tache
     conditions_list += conds_choisies
     toutes_conditions += conds_tache
-    print(tache)
-    print(conditions_par_tache[tache])
-    print(conds_choisies)
-    print(conditions_list)
 
 conditions_list = uniques(conditions_list)
 toutes_conditions = uniques(toutes_conditions)
@@ -503,9 +499,6 @@ def extraire_fenetres(_donnees_preparees, taches_tuple, conditions_tuple, positi
                     else:
                         col_acc = f'acc_B_vers_A_{pos}'
                         col_v = f'vitesse_B_vers_A_{pos}'
-
-                    print("pas_direction =", pas_direction, "| essai =", nom)
-                    print(col_v, df[col_v].nunique() if col_v in df.columns else "ABSENTE", df[col_v].iloc[100:105].tolist() if col_v in df.columns else "")
                             
                     if col_acc not in df.columns or col_v not in df.columns:
                         continue
