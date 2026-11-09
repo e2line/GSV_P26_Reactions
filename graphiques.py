@@ -20,6 +20,8 @@ CONDITIONS = ['BB', 'BH', 'HB', 'HH', 'GB', 'GH']
 POSITIONS = ['tt', 'rt', 'tr', 'rr']
 TYPES_EVENTS = ['rupture', 'reprise']
 ROLES = ['A', 'B']
+TACHES = ['GSV', 'BST', 'COL']
+# Autres variables définies dans la Config
 
 st.title("Analyse temporelle des réactions")
 
@@ -27,78 +29,86 @@ st.title("Analyse temporelle des réactions")
 # CHARGEMENT
 # ============================================================
 
+@st.cache_data(show_spinner="Préparation des données…")
+def preparer_donnees(taches_lst, conditions_par_tache, positions_lst, pas_direction):
+    """
+    Vérifie que le cache existe pour chaque tâche sélectionnée, le construit
+    si nécessaire, puis enrichit chaque essai avec les colonnes calculées
+    (vitesse signée, accélération, etc.) pour les positions demandées.
+
+    Retourne un dict :
+        { (tache, condition, essai) : df_enrichi }
+    """
+    donnees = {}
+    for tache in taches_lst:
+        Config.charger_tache(tache)
+        cache_tache = Path(Config.CACHE_DIR)
+        if not cache_tache.exists():
+            # Construire le cache pour cette tâche
+            construire_charger_cache(force_reload=False, tronquer_debut=True)
+
+        # Parcourir les conditions demandées
+        for cond in conditions_par_tache[tache]:
+            chemin_cond = Path(Config.CACHE_DIR) / cond
+            if not chemin_cond.exists():
+                continue   # condition absente pour cette tâche, on saute
+
+            for fichier in chemin_cond.glob("*.parquet"):
+                essai = fichier.stem
+                df = pd.read_parquet(fichier)
+                for pos in positions_lst:
+                    df = enrichir_dataframe_graphique(df, pos, pas_direction)
+                donnees[(tache, cond, essai)] = df
+
+    return donnees
+
 # LISTE DES ESSAIS
 @st.cache_data
-def lister_essais():
+def lister_essais(taches_lst: list[str], cond_lst: list[str]):
     essais = []
-    for cond in CONDITIONS:
-        for fichier in CACHE_DIR.glob(f"{cond}_*.parquet"):
-            nom = fichier.stem.replace(f"{cond}_", "")
-            essais.append({
-                'condition': cond,
-                'essai': nom,
-            })
+    for tache in taches_lst:
+        for cond in cond_lst:
+            for fichier in Path(f"cache/{tache}/{cond}").glob("*.parquet"):
+                essais.append({
+                    'tache': tache,
+                    'condition': cond,
+                    'essai': fichier.stem
+                })
     return pd.DataFrame(essais)
 
-df_essais = lister_essais()
 
 @st.cache_data
-def lister_evenements(essai, type_event):
+def lister_evenements(essai, type_event, tache, cond):
     if essai == 'Tous':
         return ['Tous']
-
-    fichier = None
-    for cond in CONDITIONS:
-        candidat = CACHE_DIR / f"{cond}_{essai}.parquet"
-        if candidat.exists():
-            fichier = candidat
-            break
-
-    if fichier is None:
-        return ['Tous']
-
-    df = pd.read_parquet(fichier)
-
+    
+    df = pd.read_parquet(f"cache/{tache}/{cond}/{essai}.parquet")
+    
     if 'contact_AB' not in df.columns:
         return ['Tous']
-
-    idx_ruptures, idx_reprises = detecter_ruptures_contact(
-        df, 'contact_AB', col_temps='temps_relatif_ms'
-    )
-
+    
+    if 'contact_AB' not in df.columns:
+        return ['Tous']
+    
+    idx_ruptures, idx_reprises = detecter_ruptures_contact(df, 'contact_AB', col_temps='temps_relatif_ms', duree_min_ms= 500)
+    
     if type_event == 'rupture':
         idx_events = idx_ruptures
     elif type_event == 'reprise':
         idx_events = idx_reprises
     else:
         idx_events = list(idx_ruptures) + list(idx_reprises)
-
+    
     return ['Tous'] + list(range(len(idx_events)))
 
 
-def detecter_ruptures_contact(df: pd.DataFrame, col_contact: str,
-                               col_temps: str = "temps_relatif_ms",
-                               duree_min_ms: float = 0) -> tuple[np.ndarray, np.ndarray]:
-    diff = df[col_contact].diff()
-    idx_ruptures = df.index[diff == -1].tolist()
-    idx_reprises = df.index[diff == 1].tolist()
-
-    temps = pd.to_numeric(df[col_temps], errors='coerce').to_numpy()
-
-    ruptures_valides = []
-    reprises_valides = []
-
-    for idx_r in idx_ruptures:
-        suivant = next((i for i in idx_reprises if i > idx_r), None)
-        fin_idx = suivant if suivant is not None else len(df) - 1
-        duree_ms = temps[fin_idx] - temps[idx_r]
-
-        if duree_ms >= duree_min_ms:
-            ruptures_valides.append(idx_r)
-            if suivant is not None:
-                reprises_valides.append(suivant)
-
-    return np.array(ruptures_valides), np.array(reprises_valides)
+def uniques(seq):
+    """Retourne une liste sans doublons, en gardant l'ordre d'apparition."""
+    vus = []
+    for x in seq:
+        if x not in vus:
+            vus.append(x)
+    return vus
 
 
 def comparer_courbes(donnees, cles, fenetre_avant):
@@ -107,19 +117,19 @@ def comparer_courbes(donnees, cles, fenetre_avant):
         for cle2 in cles[i+1:]:
             data1 = donnees[cle1]
             data2 = donnees[cle2]
-
+            
             acc1 = np.concatenate(data1['acc']) if data1['acc'] else np.array([])
             acc2 = np.concatenate(data2['acc']) if data2['acc'] else np.array([])
             v1 = np.concatenate(data1['v']) if data1['v'] else np.array([])
             v2 = np.concatenate(data2['v']) if data2['v'] else np.array([])
-
+            
             n = min(len(acc1), len(acc2))
             if n == 0:
                 continue
-
+            
             acc1, acc2 = acc1[:n], acc2[:n]
             v1, v2 = v1[:n], v2[:n]
-
+            
             resultats.append({
                 'courbe_1': cle1,
                 'courbe_2': cle2,
@@ -132,17 +142,145 @@ def comparer_courbes(donnees, cles, fenetre_avant):
             })
     return pd.DataFrame(resultats)
 
+
+def construire_gif_reaction(fenetres_v, fenetre_avant_ms, pas_direction_ms, titre="", fps=100, rayon_corps_percu=20.0, rayon_corps_percevant=50.0, taille_case=20.0, n_cases=4, distance_initiale=60.0):
+    """
+    Construit un GIF (BytesIO) modélisant la réaction radiale d'un individu
+    à un objet fixe, à partir des vitesses signées (px/ms).
+
+    Paramètres
+    ----------
+    fenetres_v : list[np.ndarray]
+        Liste des fenêtres de vitesse signée (px/ms), une par essai.
+    fenetre_avant_ms : int
+        Durée de la fenêtre avant l'évènement (ms).
+    pas_direction_ms : int
+        Pas d'échantillonnage temporel (ms), typiquement 10.
+    titre : str
+        Titre affiché sur la figure.
+    fps : int
+        Images par seconde du GIF.
+    rayon_corps : float
+        Rayon du corps perçu (px).
+    taille_case : float
+        Côté d'une case de la matrice de l'objet (px).
+    n_cases : int
+        Nombre de cases par côté (matrice n_cases × n_cases).
+    distance_initiale : float
+        Distance centre-à-centre à t=0 (px).
+
+    Retour
+    ------
+    BytesIO ou None
+        Buffer du GIF prêt à être lu, ou None si aucune donnée exploitable.
+    """
+    if not fenetres_v:
+        return None
+
+    dt = float(pas_direction_ms)
+
+    # --- Vitesse moyenne sur la grille de temps ---
+    n_max = max(len(v) for v in fenetres_v)
+    v_mat = np.full((len(fenetres_v), n_max), np.nan)
+    for i, v in enumerate(fenetres_v):
+        v_mat[i, :len(v)] = v
+    v_moy = np.nanmean(v_mat, axis=0)
+
+    temps_ms = np.arange(n_max) * dt - fenetre_avant_ms
+    idx_zero = int(np.argmin(np.abs(temps_ms)))
+
+    # --- Reconstruction de la distance radiale ---
+    # Convention : v < 0 = approche, v > 0 = éloignement
+    distances = np.full(n_max, np.nan)
+    distances[idx_zero] = distance_initiale
+
+    for i in range(idx_zero + 1, n_max):
+        distances[i] = (distances[i-1] if np.isnan(v_moy[i])
+                        else distances[i-1] - v_moy[i] * dt)
+    for i in range(idx_zero - 1, -1, -1):
+        distances[i] = (distances[i+1] if np.isnan(v_moy[i+1])
+                        else distances[i+1] + v_moy[i+1] * dt)
+    distances = np.clip(distances, 0, None)
+
+    # --- Préparation de la figure ---
+    taille_grille = taille_case * n_cases
+    d_max = max(200.0, float(np.nanmax(distances)) + 60.0)
+
+    fig_anim, ax = plt.subplots(figsize=(8, 4))
+
+    couleur_case_A = '#E88A2E'
+    couleur_case_B = '#B5651D'
+    for i in range(n_cases):
+        for j in range(n_cases):
+            x0 = -taille_grille/2 + j * taille_case
+            y0 = -taille_grille/2 + i * taille_case
+            couleur = couleur_case_A if (i + j) % 2 == 0 else couleur_case_B
+            ax.add_patch(Rectangle((x0, y0), taille_case, taille_case,
+                                   facecolor=couleur, edgecolor='white',
+                                   linewidth=0.5, zorder=1))
+
+    ax.add_patch(Circle((0, 0), rayon_corps_percevant, fill=False, edgecolor='purple', linewidth=1.2, linestyle='--', zorder=2))
+    ax.add_patch(Circle((0, 0), rayon_corps_percu, facecolor='blue', edgecolor='none', zorder=3))
+
+    individu_patch = Circle((distance_initiale, 0), rayon_corps_percu, facecolor='blue', edgecolor='none', linewidth=1.5, zorder=4)
+    ax.add_patch(individu_patch)
+
+    ligne_contact, = ax.plot([], [], color='gray', linestyle=':',
+                             linewidth=1, alpha=0.6, zorder=0)
+    txt_info = ax.text(0.02, 0.95, '', transform=ax.transAxes,
+                       verticalalignment='top', fontsize=10,
+                       family='monospace',
+                       bbox=dict(boxstyle='round', facecolor='white',
+                                 alpha=0.8))
+
+    ax.set_title(titre, fontsize=12)
+    ax.set_xlim(-d_max, d_max)
+    ax.set_ylim(-d_max * 0.3, d_max * 0.3)
+    ax.set_aspect('equal')
+    ax.axhline(0, color='gray', linewidth=0.5, alpha=0.5)
+    ax.set_xlabel('Position x (px)')
+    ax.set_yticks([])
+
+    def update(frame_idx):
+        d = distances[frame_idx]
+        t = temps_ms[frame_idx]
+        v = v_moy[frame_idx] if not np.isnan(v_moy[frame_idx]) else 0.0
+
+        individu_patch.center = (d, 0)
+        ligne_contact.set_data([0, d], [0, 0])
+        if v < -0.01:
+            ligne_contact.set_color('green')
+        elif v > 0.01:
+            ligne_contact.set_color('red')
+        else:
+            ligne_contact.set_color('gray')
+
+        txt_info.set_text(f"t = {t:+.0f} ms\nd = {d:.1f} px\nv = {v:+.3f} px/ms")
+        return individu_patch, ligne_contact, txt_info
+
+    anim = FuncAnimation(fig_anim, update, frames=n_max, interval=1000 // fps, blit=True)
+
+    # PillowWriter exige un chemin de fichier : on passe par un fichier temporaire
+    buf_gif = io.BytesIO()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        chemin_tmp = os.path.join(tmpdir, "anim.gif")
+        anim.save(chemin_tmp, writer=PillowWriter(fps=fps))
+        with open(chemin_tmp, "rb") as f:
+            buf_gif.write(f.read())
+
+    buf_gif.seek(0)
+    plt.close(fig_anim)
+    return buf_gif
+
 # ============================================================
 # SIDEBAR
 # ============================================================
 
 st.sidebar.header("Affichage")
-mode_affichage = st.sidebar.radio(
-    "Mode d'affichage :", ['Courbe', 'Nuage de points'], index=0
-)
+mode_affichage = st.sidebar.radio("Mode d'affichage :", ['Courbe', 'Nuage de points'], index=0)
 
 if mode_affichage == 'Nuage de points':
-    extremes = st.checkbox(label='Afficher extrèmes', value=True)
+    extremes = st.checkbox(label='Afficher les extrêmes', value=True)
     lisse = False
 else:
     extremes = True
@@ -151,6 +289,21 @@ prochains = st.checkbox(label='Afficher les deux prochains évènements', value=
 
 
 st.sidebar.header("Paramètres")
+
+st.sidebar.subheader("Tâche (défaut=Toutes)")
+gsv = st.sidebar.checkbox("GSV")
+bst = st.sidebar.checkbox("BST")
+col = st.sidebar.checkbox("COL")
+
+taches_list = []
+if gsv: taches_list.append('GSV')
+if bst: taches_list.append('BST')
+if col: taches_list.append('COL')
+if taches_list == []:
+    taches_list = TACHES
+    taches_tuple = (taches_list, True)
+else:
+    taches_tuple = (taches_list, False)
 
 st.sidebar.subheader("Type d'évènement (défaut=Tous)")
 rupture = st.sidebar.checkbox("Ruptures", False)
@@ -162,48 +315,94 @@ rr = st.sidebar.checkbox('Souris-Souris', False)
 rt = st.sidebar.checkbox('Souris guide-Curseur suiveur', False)
 tr = st.sidebar.checkbox('Curseur guide-Souris suiveur', False)
 
-st.sidebar.subheader("Mode de jeu")
-gsv = st.sidebar.checkbox('Guide-Suiveur')
-gg = st.sidebar.checkbox('Guide-Guide')
+if taches_list == ['GSV']:
+    st.sidebar.subheader("Mode de jeu")
+    gs = st.sidebar.checkbox('Guide-Suiveur')
+    gg = st.sidebar.checkbox('Guide-Guide')
+    if gs and not gg:
+        st.sidebar.subheader("Rôles (défaut=Tous)")
+        role1 = st.sidebar.checkbox('Guide', False)
+        role2 = st.sidebar.checkbox('Suiveur', False)
+    elif gg and not gs:
+        st.sidebar.subheader("Individus (défaut=Tous)")
+        role1 = st.sidebar.checkbox('Guide A', False)
+        role2 = st.sidebar.checkbox('Guide B', False)
+    else:
+        st.sidebar.subheader("Individus (défaut=Tous)")
+        role1 = st.sidebar.checkbox('Guide/Guide A', False)
+        role2 = st.sidebar.checkbox('Suiveur/Guide B', False)
 
-if gsv and not gg:
-    st.sidebar.subheader("Rôles (défaut=Tous)")
-    role1 = st.sidebar.checkbox('Guide', False)
-    role2 = st.sidebar.checkbox('Suiveur', False)
-elif gg and not gsv:
-    st.sidebar.subheader("Individus (défaut=Tous)")
-    role1 = st.sidebar.checkbox('Guide A', False)
-    role2 = st.sidebar.checkbox('Guide B', False)
+elif len(taches_list) == 1:
+    st.sidebar.subheader("Sujets (défaut=Tous)")
+    role1 = st.sidebar.checkbox("Sujet A", False)
+    role2 = st.sidebar.checkbox("Sujet B", False)
 
 
 st.sidebar.subheader("Conditions (défaut=Toutes)")
-if gsv or not gg:
+"""
+if gs or not gg:
     bb = st.sidebar.checkbox('BB', False)
     bh = st.sidebar.checkbox('BH', False)
     hb = st.sidebar.checkbox('HB', False)
     hh = st.sidebar.checkbox('HH', False)
-if gg or not gsv:
+if gg or not gs:
     gb = st.sidebar.checkbox('Guide-Guide B', False)
     gh = st.sidebar.checkbox('Guide-Guide H', False)
+"""
+conditions_list = []
+toutes_conditions = []
+conditions_par_tache = {}
+for tache in taches_list:
+    st.sidebar.markdown(f"**{tache}**")
+    # Charger la config de la tâche pour connaître ses conditions
+    try:
+        module = importlib.import_module(f"taches.{tache}.config_{tache}")
+        classe = getattr(module, f"Config_{tache}")
+        conds_tache = classe.CONDITIONS
+    except (ModuleNotFoundError, AttributeError):
+        st.sidebar.warning(f"Config {tache} introuvable")
+        conds_tache = []
+    
+    conds_choisies = [
+        c for c in conds_tache
+        if st.sidebar.checkbox(c, key=f"cond_{tache}_{c}")
+    ]
+    conditions_par_tache[tache] = conds_choisies or conds_tache
+    conditions_list += conds_choisies
+    toutes_conditions += conds_tache
+    print(tache)
+    print(conditions_par_tache[tache])
+    print(conds_choisies)
+    print(conditions_list)
+
+conditions_list = uniques(conditions_list)
+toutes_conditions = uniques(toutes_conditions)
+if not conditions_list:
+    conditions_list = toutes_conditions
+    conditions_tuple = (conditions_list, True)
+else:
+    conditions_tuple = (conditions_list, False)
 
 
 # ============================================================
 # FILTRAGE
 # ============================================================
+
+"""
 conditions_list = []
-conditions_list_gsv = []
-if gsv:
-    if bb: conditions_list_gsv.append('BB')
-    if bh: conditions_list_gsv.append('BH')
-    if hb: conditions_list_gsv.append('HB')
-    if hh: conditions_list_gsv.append('HH')
-    if conditions_list_gsv == []:
-        conditions_list_gsv = ['BB', 'BH', 'HB', 'HH']
-        conditions_tuple_gsv = (conditions_list_gsv, True)
+conditions_list_gs = []
+if gs:
+    if bb: conditions_list_gs.append('BB')
+    if bh: conditions_list_gs.append('BH')
+    if hb: conditions_list_gs.append('HB')
+    if hh: conditions_list_gs.append('HH')
+    if conditions_list_gs == []:
+        conditions_list_gs = ['BB', 'BH', 'HB', 'HH']
+        conditions_tuple_gs = (conditions_list_gs, True)
     else:
-        conditions_tuple_gsv = (conditions_list_gsv, False)
+        conditions_tuple_gs = (conditions_list_gs, False)
 else:
-    conditions_tuple_gsv = (conditions_list_gsv, True)
+    conditions_tuple_gs = (conditions_list_gs, True)
 
 conditions_list_gg = []
 if gg:
@@ -217,20 +416,17 @@ if gg:
 else:
     conditions_tuple_gg = (conditions_list_gg, True)
 
-if conditions_tuple_gsv[1]:
+if conditions_tuple_gs[1]:
     conditions_list += conditions_list_gg
 if conditions_tuple_gg[1]:
-    conditions_list += conditions_list_gsv
+    conditions_list += conditions_list_gs
 
-if gsv or gg:
+if gs or gg:
     conditions_tuple = (conditions_list, False)
-else :
-    conditions_list = CONDITIONS
+else:
+    conditions_list = Config.CONDITIONS
     conditions_tuple = (conditions_list, True)
-
-print(conditions_tuple_gsv)
-print(conditions_tuple_gg)
-print(conditions_tuple)
+"""
 
 positions_list = []
 if tt: positions_list.append('tt')
@@ -238,7 +434,8 @@ if rr: positions_list.append('rr')
 if rt: positions_list.append('rt')
 if tr: positions_list.append('tr')
 if positions_list == []:
-    positions_tuple = (POSITIONS, True)
+    positions_list = Config.POSITIONS
+    positions_tuple = (positions_list, True)
 else:
     positions_tuple = (positions_list, False)
 
@@ -252,7 +449,7 @@ elif reprise:
 else:
     type_events_tuple = (TYPES_EVENTS, True)
 
-if (gsv and not gg) or (gg and not gsv):
+if taches_list == ['GSV'] and ((gs and not gg) or (gg and not gs)) or len(taches_list) == 1:
     if role1:
         if role2:
             roles_tuple = (ROLES, False)
@@ -265,11 +462,11 @@ else:
     roles_tuple = (ROLES, True)
 
 # Essai
-if conditions_list == CONDITIONS:
+df_essais = lister_essais(taches_list, conditions_list)
+if 'essai' in df_essais.columns:
     essais_disponibles = ['Tous'] + sorted(df_essais['essai'].unique().tolist())
 else:
-    essais_filtres = df_essais[df_essais['condition'].isin(conditions_list)]['essai'].unique()
-    essais_disponibles = ['Tous'] + sorted(essais_filtres.tolist())
+    essais_disponibles = ['Tous']
 
 essai = st.sidebar.selectbox("Essai :", essais_disponibles)
 
@@ -277,7 +474,10 @@ essai = st.sidebar.selectbox("Essai :", essais_disponibles)
 evenement = 'Tous'
 if essai != 'Tous' and (rupture or reprise):
     type_event_pour_event = 'rupture' if rupture else 'reprise'
-    evenements_disponibles = lister_evenements(essai, type_event_pour_event)
+    ligne = df_essais[df_essais['essai'] == essai]
+    condition_essai = ligne['condition'].iloc[0] if not ligne.empty else None
+    tache_essai = ligne['tache'].iloc[0] if not ligne.empty else None
+    evenements_disponibles = lister_evenements(essai, type_event_pour_event, tache_essai, condition_essai)
     evenement = st.sidebar.selectbox("Événement :", evenements_disponibles)
 
 # Echantillonage
@@ -291,15 +491,24 @@ fenetre_apres = st.sidebar.slider("Fenêtre après (ms)", 500, 3000, 1500, 100, 
 # Pas direction
 pas_direction = st.sidebar.slider("Fenêtre glissante d'enregistrement de la vitesse (ms)", 40, 500, 200, 20, help="Temps entre les enregistrements des positions d'un individu pour le calcul de la vitesse") //10
 
+
+donnees_preparees = preparer_donnees(
+    sorted(taches_list),
+    conditions_par_tache,
+    tuple(positions_list),
+    pas_direction
+)
+
 # ============================================================
 # EXTRACTION DES FENÊTRES
 # ============================================================
 
 @st.cache_data
-def extraire_fenetres(conditions_tuple_gsv, conditions_tuple_gg, conditions_tuple, positions_tuple, type_events_tuple,
+def extraire_fenetres(_donnees_preparees, taches_tuple, conditions_tuple, positions_tuple, type_events_tuple,
                        roles_tuple, essai_filtre, evenement_filtre,
                        fenetre_avant_ms, fenetre_apres_ms, pas_direction):
 
+    taches_list = taches_tuple[0]
     conditions_list = conditions_tuple[0]
     positions_list = positions_tuple[0]
     type_events_list = type_events_tuple[0]
@@ -310,127 +519,104 @@ def extraire_fenetres(conditions_tuple_gsv, conditions_tuple_gg, conditions_tupl
     
     donnees = {}
     
-    for cond in conditions_list:
-        fichiers = list(CACHE_DIR.glob(f"{cond}_*.parquet"))
-            
-        for fichier in fichiers:
-            nom = fichier.stem.replace(f"{cond}_", "")
-            if essai_filtre != 'Tous' and nom != essai_filtre:
-                continue
-            
-            df = pd.read_parquet(fichier)
-            if 'contact_AB' not in df.columns:
-                continue
+    for (tache, cond, nom), df in _donnees_preparees.items():
+        if essai_filtre != 'Tous' and nom != essai_filtre:
+            continue
+        if 'contact_AB' not in df.columns:
+            continue
+        
+        idx_ruptures, idx_reprises = detecter_ruptures_contact(df, 'contact_AB', col_temps='temps_relatif_ms', duree_min_ms= 500)
+        tous_les_evenements = ([(idx, 'rupture') for idx in idx_ruptures] + [(idx, 'reprise') for idx in idx_reprises])
+        tous_les_evenements.sort()
+                
+        for pos in positions_list:
+            for te in type_events_list:
+                idx_events = idx_ruptures if te == 'rupture' else idx_reprises
+                        
+                if evenement_filtre != 'Tous':
+                    if evenement_filtre < len(idx_events):
+                        idx_events = [idx_events[evenement_filtre]]
+                    else:
+                        idx_events = []
+                    
+                for r in roles_list:
+                    if r == 'A':
+                        col_acc = f'acc_A_vers_B_{pos}'
+                        col_v = f'vitesse_A_vers_B_{pos}'
+                    else:
+                        col_acc = f'acc_B_vers_A_{pos}'
+                        col_v = f'vitesse_B_vers_A_{pos}'
 
-            # Recalcul en mémoire des colonnes enrichies avec le pas_direction choisi
-            for pos in positions_list:
-                df = enrichir_dataframe(df, pos, pas_direction)
-            
-            idx_ruptures, idx_reprises = detecter_ruptures_contact(
-                df, 'contact_AB', col_temps='temps_relatif_ms'
-            )
-            tous_les_evenements = (
-                [(idx, 'rupture') for idx in idx_ruptures] +
-                [(idx, 'reprise') for idx in idx_reprises]
-            )
-            tous_les_evenements.sort()
-            
-            for pos in positions_list:
-                for te in type_events_list:
-                    idx_events = idx_ruptures if te == 'rupture' else idx_reprises
-                    
-                    if evenement_filtre != 'Tous':
-                        if evenement_filtre < len(idx_events):
-                            idx_events = [idx_events[evenement_filtre]]
-                        else:
-                            idx_events = []
-                    
-                    for r in roles_list:
-                        if r == 'A':
-                            col_acc = f'acc_A_vers_B_{pos}'
-                            col_v = f'v_signed_A_vers_B_{pos}'
-                        else:
-                            col_acc = f'acc_B_vers_A_{pos}'
-                            col_v = f'v_signed_B_vers_A_{pos}'
-                        
-                        if col_acc not in df.columns or col_v not in df.columns:
+                    print("pas_direction =", pas_direction, "| essai =", nom)
+                    print(col_v, df[col_v].nunique() if col_v in df.columns else "ABSENTE", df[col_v].iloc[100:105].tolist() if col_v in df.columns else "")
+                            
+                    if col_acc not in df.columns or col_v not in df.columns:
+                        continue
+                            
+                    for idx in idx_events:
+                        if idx - n_avant < 20:
                             continue
+                                
+                        idx_debut = max(0, idx - n_avant)
+                        idx_fin = min(len(df), idx + n_apres)
+                        fenetre = df.iloc[idx_debut:idx_fin]
                         
-                        for idx in idx_events:
-                            if idx - n_avant < 20:
+                        if len(fenetre) < n_avant + 10:
+                            continue
+                            
+                        # Autres événements
+                        autres_evenements = []
+                        for idx_autre, type_autre in tous_les_evenements:
+                            if idx_autre == idx:
                                 continue
-                            
-                            idx_debut = max(0, idx - n_avant)
-                            idx_fin = min(len(df), idx + n_apres)
-                            fenetre = df.iloc[idx_debut:idx_fin]
-                            
-                            if len(fenetre) < n_avant + 10:
-                                continue
-                            
-                            # Autres événements
-                            autres_evenements = []
-                            for idx_autre, type_autre in tous_les_evenements:
-                                if idx_autre == idx:
-                                    continue
-                                if idx_debut <= idx_autre < idx_fin:
-                                    temps_rel = (idx_autre - idx) * 10
-                                    autres_evenements.append({
-                                        'temps_relatif_ms': temps_rel,
-                                        'type': type_autre,
-                                    })
-                            
-                            # Les deux prochains événements (peu importe le type)
-                            prochains = [
-                                idx_autre for idx_autre, _ in tous_les_evenements
-                                if idx_autre > idx
-                            ]
-                            prochains = sorted(prochains)[:2]
-                            
-                            deux_prochains = [
-                                (idx_autre - idx) * 10 for idx_autre in prochains
-                            ]
-                            while len(deux_prochains) < 2:
-                                deux_prochains.append(None)
-                            
-                            # Groupe
-                            groupes = []
-                            if cond in conditions_tuple_gsv[0]:
-                                if not conditions_tuple[1]:
-                                    groupes.append('GSV')
-                                if not conditions_tuple_gsv[1]:
-                                    groupes.append(cond)
-                            if cond in conditions_tuple_gg[0]:
-                                if not conditions_tuple[1]:
-                                    groupes.append('GG')
-                                if not conditions_tuple_gg[1]:
-                                    groupes.append(cond)
-                            if not positions_tuple[1]:
-                                groupes.append(pos)
-                            if not type_events_tuple[1]:
-                                groupes.append(te)
-                            if not roles_tuple[1]:
-                                groupes.append(r)
-                            
-                            cle = '_'.join(groupes) if groupes else ''
-                            
-                            if cle not in donnees:
-                                donnees[cle] = {
-                                    'acc': [], 'v': [],
-                                    'autres_evenements': [],
-                                    'deux_prochains': [],
-                                }
-                            
-                            donnees[cle]['acc'].append(fenetre[col_acc].values)
-                            donnees[cle]['v'].append(fenetre[col_v].values)
-                            donnees[cle]['autres_evenements'].append(autres_evenements)
-                            donnees[cle]['deux_prochains'].append(deux_prochains)
+                            if idx_debut <= idx_autre < idx_fin:
+                                temps_rel = (idx_autre - idx) * 10
+                                autres_evenements.append({
+                                    'temps_relatif_ms': temps_rel,
+                                    'type': type_autre,
+                                })
+                                
+                        # Les deux prochains événements (peu importe le type)
+                        prochains = [idx_autre for idx_autre, _ in tous_les_evenements if idx_autre > idx]
+                        prochains = sorted(prochains)[:2]
+                                
+                        deux_prochains = [(idx_autre - idx) * 10 for idx_autre in prochains]
+                        while len(deux_prochains) < 2:
+                            deux_prochains.append(None)
+                                
+                        # Groupe
+                        groupes = []
+                        if not taches_tuple[1]:
+                            groupes.append(tache)
+                        if not conditions_tuple[1]:
+                            groupes.append(cond)
+                        if not positions_tuple[1]:
+                            groupes.append(pos)
+                        if not type_events_tuple[1]:
+                            groupes.append(te)
+                        if not roles_tuple[1]:
+                            groupes.append(r)
+                                
+                        cle = '_'.join(groupes) if groupes else ''
+                                
+                        if cle not in donnees:
+                            donnees[cle] = {
+                                'acc': [], 'v': [],
+                                'autres_evenements': [],
+                                'deux_prochains': [],
+                            }
+                                
+                        donnees[cle]['acc'].append(fenetre[col_acc].values)
+                        donnees[cle]['v'].append(fenetre[col_v].values)
+                        donnees[cle]['autres_evenements'].append(autres_evenements)
+                        donnees[cle]['deux_prochains'].append(deux_prochains)
     
     return donnees
 
 # Extraire les fenêtres
 donnees = extraire_fenetres(
-    conditions_tuple_gsv,
-    conditions_tuple_gg,
+    donnees_preparees,
+    taches_tuple,
     conditions_tuple,
     positions_tuple,
     type_events_tuple,
@@ -454,9 +640,13 @@ LABELS_LISIBLES = {
     'reprise': 'Reprises',
     'BB': 'BB', 'BH': 'BH', 'HB': 'HB', 'HH': 'HH',
 }
-if gg and not gsv:
-    LABELS_LISIBLES['A'] = 'Guide A'
-    LABELS_LISIBLES['B'] = 'Guide B'
+if taches_list == ['GSV']:
+    if gg and not gs:
+        LABELS_LISIBLES['A'] = 'Guide A'
+        LABELS_LISIBLES['B'] = 'Guide B'
+    else :
+        LABELS_LISIBLES['A'] = 'Guide'
+        LABELS_LISIBLES['B'] = 'Suiveur'
 
 def traduire(cle):
     if not cle:
@@ -545,6 +735,7 @@ else:
 
             ax1.fill_between(temps, acc_moy - acc_sem, acc_moy + acc_sem, color=couleur, alpha=0.15)
             ax2.fill_between(temps, v_moy - v_sem, v_moy + v_sem, color=couleur, alpha=0.15)
+
         else:
             pas = max(1, echantillon // 10)
             points_temps = []
@@ -644,11 +835,21 @@ else:
     buf.seek(0)
 
     st.download_button(
-        label="📂 Télécharger le graphique",
-        data=buf,
-        mime="image/png"
-    )
-    
+        label="📂 Télécharger le graphique", data=buf, mime="image/png")
+
+    # ANIMATION RÉACTION À UN OBJET FIXE
+    with st.subheader("Animations de la réaction"):
+        onglets = st.tabs([traduire(c) or "Toutes" for c in cles_triees])
+        for onglet, c in zip(onglets, cles_triees):
+            with onglet:
+                gif_buf = construire_gif_reaction(fenetres_v=donnees[c]['v'], fenetre_avant_ms=fenetre_avant, pas_direction_ms=10, titre=traduire(c), fps=100,)
+                if gif_buf is None:
+                    st.info("Pas de données pour cette sélection.")
+                else:
+                    st.image(gif_buf, width="stretch")
+                    gif_buf.seek(0)
+                    st.download_button(label="📂 Télécharger l'animation", data=gif_buf, mime="image/gif", file_name=f"animation_{c or 'toutes'}.gif", key=f"dl_gif_{c}",)
+
     # ============================================================
     # STATISTIQUES
     # ============================================================
