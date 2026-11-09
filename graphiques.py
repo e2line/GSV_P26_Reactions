@@ -34,7 +34,7 @@ st.title("Analyse temporelle des réactions")
 # ============================================================
 # CHARGEMENT
 # ============================================================
-print("prepa données")
+st.write("prepa données")
 @st.cache_data(show_spinner="Préparation des données…")
 def preparer_donnees(taches_lst, conditions_par_tache, positions_lst, pas_direction):
     """
@@ -45,7 +45,7 @@ def preparer_donnees(taches_lst, conditions_par_tache, positions_lst, pas_direct
     Retourne un dict :
         { (tache, condition, essai) : df_enrichi }
     """
-    print("exécuté")
+    st.write("exécuté")
     donnees = {}
     for tache in taches_lst:
         Config.charger_tache(tache)
