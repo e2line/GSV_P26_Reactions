@@ -4,12 +4,18 @@ from pathlib import Path
 # --- Ajouter la racine au PYTHONPATH ---
 RACINE = Path(__file__).resolve().parent
 sys.path.insert(0, str(RACINE))
-
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib.patches import Circle, Rectangle
 import numpy as np
 import io
+import tempfile
+import os
+import importlib
+
+from config import Config
 from traitement_fichier import enrichir_dataframe
 
 st.cache_data.clear()
