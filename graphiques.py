@@ -36,6 +36,7 @@ st.title("Analyse temporelle des réactions")
 # ============================================================
 # CHARGEMENT
 # ============================================================
+st.cache_data.clear()
 
 @st.cache_data(show_spinner="Préparation des données…")
 def preparer_donnees(taches_lst, conditions_par_tache, positions_lst, pas_direction):
