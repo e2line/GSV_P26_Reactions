@@ -76,7 +76,7 @@ def lister_essais(taches_lst: list[str], cond_lst: list[str]):
     essais = []
     for tache in taches_lst:
         for cond in cond_lst:
-            for fichier in Path(f"cache/{tache}/{cond}").glob("*.parquet"):
+            for fichier in Path(f"{CACHE_DIR}/{tache}/{cond}").glob("*.parquet"):
                 essais.append({
                     'tache': tache,
                     'condition': cond,
