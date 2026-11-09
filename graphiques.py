@@ -20,8 +20,6 @@ from data.build_cache import construire_charger_cache
 from data.contact import detecter_ruptures_contact
 from traitement_fichier import enrichir_dataframe
 
-st.cache_data.clear()
-
 # --- Configuration ---
 CACHE_DIR = RACINE / "cache"
 CONDITIONS = ['BB', 'BH', 'HB', 'HH', 'GB', 'GH']
@@ -445,6 +443,7 @@ fenetre_apres = st.sidebar.slider("Fenêtre après (ms)", 500, 3000, 1500, 100, 
 # Pas direction
 pas_direction = st.sidebar.slider("Fenêtre glissante d'enregistrement de la vitesse (ms)", 40, 500, 200, 20, help="Temps entre les enregistrements des positions d'un individu pour le calcul de la vitesse") //10
 
+st.cache_data.clear()
 
 donnees_preparees = preparer_donnees(
     sorted(taches_list),
