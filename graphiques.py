@@ -16,6 +16,8 @@ import os
 import importlib
 
 from config import Config
+from data.build_cache import construire_charger_cache
+from data.contact import detecter_ruptures_contact
 from traitement_fichier import enrichir_dataframe
 
 st.cache_data.clear()
