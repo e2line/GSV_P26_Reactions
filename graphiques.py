@@ -290,8 +290,11 @@ if mode_affichage == 'Nuage de points':
 else:
     extremes = True
     lisse = st.checkbox(label="Lisser la courbe", value = True)
-prochains = st.checkbox(label='Afficher les deux prochains évènements', value=False)
+periode = st.sidebar.radio("Période d'affichage :", ['Evenement', 'Essai'], index=0)
 
+prochains = False
+if periode=='Evenement':
+    prochains = st.checkbox(label='Afficher les deux prochains évènements', value=False)
 
 st.sidebar.header("Paramètres")
 
@@ -310,9 +313,11 @@ if taches_list == []:
 else:
     taches_tuple = (taches_list, False)
 
-st.sidebar.subheader("Type d'évènement (défaut=Tous)")
-rupture = st.sidebar.checkbox("Ruptures", False)
-reprise = st.sidebar.checkbox("Reprises", False)
+rupture, reprise = False, False
+if periode == "Evenement":
+    st.sidebar.subheader("Type d'évènement (défaut=Tous)")
+    rupture = st.sidebar.checkbox("Ruptures", False)
+    reprise = st.sidebar.checkbox("Reprises", False)
 
 st.sidebar.subheader("Positions d'analyse (défaut=Toutes)")
 tt = st.sidebar.checkbox('Curseur-Curseur', False)
@@ -422,7 +427,7 @@ essai = st.sidebar.selectbox("Essai :", essais_disponibles)
 
 # Evenement
 evenement = 'Tous'
-if essai != 'Tous' and (rupture or reprise):
+if periode == 'Evenement' and essai != 'Tous' and (rupture or reprise):
     type_event_pour_event = 'rupture' if rupture else 'reprise'
     ligne = df_essais[df_essais['essai'] == essai]
     condition_essai = ligne['condition'].iloc[0] if not ligne.empty else None
@@ -435,13 +440,17 @@ if mode_affichage == "Nuage de points":
     echantillon = st.sidebar.slider("Echantillonage (ms)", 10, 500, 100, 10, help="Temps entre les différents enregistrements")
 
 # Fenêtre
-fenetre_avant = st.sidebar.slider("Fenêtre avant (ms)", 100, 1000, 500, 100, help="Fenêtre de temps affichée avant l'évènement sur le graphique")
-fenetre_apres = st.sidebar.slider("Fenêtre après (ms)", 500, 3000, 1500, 100, help="Fenêtre de temps affichée après l'évènement sur le graphique")
+if periode == "Evenement":
+    # Fenêtre
+    fenetre_avant = st.sidebar.slider("Fenêtre avant (ms)", 100, 1000, 500, 100, help="Fenêtre de temps affichée avant l'évènement sur le graphique")
+    fenetre_apres = st.sidebar.slider("Fenêtre après (ms)", 500, 3000, 1500, 100, help="Fenêtre de temps affichée après l'évènement sur le graphique")
+else:
+    fenetre_avant = 0
+    fenetre_apres = 0
 
 # Pas direction
 pas_direction = st.sidebar.slider("Fenêtre glissante d'enregistrement de la vitesse (ms)", 40, 500, 200, 20, help="Temps entre les enregistrements des positions d'un individu pour le calcul de la vitesse") //10
 
-st.cache_data.clear()
 
 donnees_preparees = preparer_donnees(
     sorted(taches_list),
@@ -449,7 +458,6 @@ donnees_preparees = preparer_donnees(
     tuple(positions_list),
     pas_direction
 )
-st.write(len(donnees_preparees))
 # ============================================================
 # EXTRACTION DES FENÊTRES
 # ============================================================
