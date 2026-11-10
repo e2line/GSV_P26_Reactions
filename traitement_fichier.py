@@ -121,12 +121,12 @@ def enrichir_dataframe(df, pos='tt', pas_direction=20):
     df = interpoler_paliers(df, [pos_A, pos_B])
     
     # Vitesses signées
-    df = vitesse_signee(df, pos_A, f'v_signed_A_vers_B_{pos}', 'A', pas_direction)
-    df = vitesse_signee(df, pos_B, f'v_signed_B_vers_A_{pos}', 'B', pas_direction)
+    df = vitesse_signee(df, pos_A, f'vitesse_A_vers_B_{pos}', 'A', pas_direction)
+    df = vitesse_signee(df, pos_B, f'vitesse_B_vers_A_{pos}', 'B', pas_direction)
     
     # Accélérations
-    df = acceleration(df, f'v_signed_A_vers_B_{pos}', f'acc_A_vers_B_{pos}', pas_direction)
-    df = acceleration(df, f'v_signed_B_vers_A_{pos}', f'acc_B_vers_A_{pos}', pas_direction)
+    df = acceleration(df, f'vitesse_A_vers_B_{pos}', f'acc_A_vers_B_{pos}', pas_direction)
+    df = acceleration(df, f'vitesse_B_vers_A_{pos}', f'acc_B_vers_A_{pos}', pas_direction)
     
     return df
 
