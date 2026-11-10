@@ -459,8 +459,13 @@ def extraire_fenetres(_donnees_preparees, taches_tuple, conditions_tuple, positi
                        roles_tuple, essai_filtre, evenement_filtre,
                        fenetre_avant_ms, fenetre_apres_ms, pas_direction):
 
-    taches_list = taches_tuple[0]
-    conditions_list = conditions_tuple[0]
+    compteurs = {
+        'essais': 0, 'sans_contact_AB': 0,
+        'essais_avec_ruptures': 0, 'essais_avec_reprises': 0,
+        'rejets_manque_colonnes': 0, 'rejets_idx_trop_tot': 0,
+        'rejets_fenetre_courte': 0, 'fenetres_gardees': 0,
+        'colonnes_manquantes_A': set(), 'colonnes_manquantes_B': set(),
+    }
     positions_list = positions_tuple[0]
     type_events_list = type_events_tuple[0]
     roles_list = roles_tuple[0]
@@ -471,12 +476,20 @@ def extraire_fenetres(_donnees_preparees, taches_tuple, conditions_tuple, positi
     donnees = {}
     
     for (tache, cond, nom), df in _donnees_preparees.items():
+        compteurs['essais'] += 1
+
         if essai_filtre != 'Tous' and nom != essai_filtre:
             continue
+
         if 'contact_AB' not in df.columns:
+            compteurs['sans_contact_AB'] += 1
             continue
+
+        idx_ruptures, idx_reprises = detecter_ruptures_contact(df, 'contact_AB', col_temps='temps_relatif_ms')
+        if len(idx_ruptures): compteurs['essais_avec_ruptures'] += 1
+        if len(idx_reprises): compteurs['essais_avec_reprises'] += 1
         
-        idx_ruptures, idx_reprises = detecter_ruptures_contact(df, 'contact_AB', col_temps='temps_relatif_ms', duree_min_ms= 500)
+        idx_ruptures, idx_reprises = detecter_ruptures_contact(df, 'contact_AB', col_temps='temps_relatif_ms')
         tous_les_evenements = ([(idx, 'rupture') for idx in idx_ruptures] + [(idx, 'reprise') for idx in idx_reprises])
         tous_les_evenements.sort()
                 
@@ -493,16 +506,34 @@ def extraire_fenetres(_donnees_preparees, taches_tuple, conditions_tuple, positi
                 for r in roles_list:
                     if r == 'A':
                         col_acc = f'acc_A_vers_B_{pos}'
-                        col_v = f'v_signed_A_vers_B_{pos}'
+                        col_v   = f'vitesse_A_vers_B_{pos}'
+                        col_x   = f'A-{pos[0]}X'
+                        col_y   = f'A-{pos[0]}Y'
                     else:
                         col_acc = f'acc_B_vers_A_{pos}'
-                        col_v = f'v_signed_B_vers_A_{pos}'
-                            
-                    if col_acc not in df.columns or col_v not in df.columns:
+                        col_v   = f'vitesse_B_vers_A_{pos}'
+                        col_x   = f'B-{pos[1]}X'
+                        col_y   = f'B-{pos[1]}Y'
+
+                    if (col_acc not in df.columns or col_v not in df.columns
+                            or col_x not in df.columns or col_y not in df.columns):
+                        compteurs['rejets_manque_colonnes'] += 1
+                        if r == 'A':
+                            for c in (col_acc, col_v, col_x, col_y):
+                                if c not in df.columns:
+                                    compteurs['colonnes_manquantes_A'].add(c)
+                        else:
+                            for c in (col_acc, col_v, col_x, col_y):
+                                if c not in df.columns:
+                                    compteurs['colonnes_manquantes_B'].add(c)
+                        continue
+
+                    if col_acc not in df.columns or col_v not in df.columns or col_x not in df.columns:
                         continue
                             
                     for idx in idx_events:
                         if idx - n_avant < 20:
+                            compteurs['rejets_idx_trop_tot'] += 1
                             continue
                                 
                         idx_debut = max(0, idx - n_avant)
@@ -510,6 +541,7 @@ def extraire_fenetres(_donnees_preparees, taches_tuple, conditions_tuple, positi
                         fenetre = df.iloc[idx_debut:idx_fin]
                         
                         if len(fenetre) < n_avant + 10:
+                            compteurs['rejets_fenetre_courte'] += 1
                             continue
                             
                         # Autres événements
@@ -549,32 +581,109 @@ def extraire_fenetres(_donnees_preparees, taches_tuple, conditions_tuple, positi
                                 
                         if cle not in donnees:
                             donnees[cle] = {
-                                'acc': [], 'v': [],
+                                'acc': [], 'v': [], 'x': [], 'y': [], 'temps': [],
                                 'autres_evenements': [],
                                 'deux_prochains': [],
                             }
-                                
+
+                        # Temps relatif à l'évènement (ms), cohérent avec le mode Essai
+                        n_f = len(fenetre)
+                        t_rel = (np.arange(n_f) - (idx - idx_debut)) * 10
+
+                        donnees[cle]['temps'].append(t_rel)
                         donnees[cle]['acc'].append(fenetre[col_acc].values)
                         donnees[cle]['v'].append(fenetre[col_v].values)
+                        donnees[cle]['x'].append(fenetre[col_x].values)
+                        donnees[cle]['y'].append(fenetre[col_y].values)
                         donnees[cle]['autres_evenements'].append(autres_evenements)
                         donnees[cle]['deux_prochains'].append(deux_prochains)
-    
+    return donnees
+
+
+@st.cache_data
+def extraire_essai(_donnees_preparees, taches_tuple, conditions_tuple, positions_tuple, roles_tuple, essai_filtre, pas_direction):
+    """Retourne, pour chaque groupe, les séries complètes + les évènements."""
+    positions_list = positions_tuple[0]
+    roles_list = roles_tuple[0]
+
+    donnees = {}
+
+    for (tache, cond, nom), df in _donnees_preparees.items():
+        if essai_filtre != 'Tous' and nom != essai_filtre:
+            continue
+        if 'contact_AB' not in df.columns:
+            continue
+
+        idx_ruptures, idx_reprises = detecter_ruptures_contact(df, 'contact_AB', col_temps='temps_relatif_ms')
+
+        # Convertir les labels d'index en positions (robuste à tout type d'index)
+        idx_ruptures = np.asarray(
+            df.index.get_indexer(np.asarray(idx_ruptures, dtype=df.index.dtype)),
+            dtype=int)
+        idx_reprises = np.asarray(
+            df.index.get_indexer(np.asarray(idx_reprises, dtype=df.index.dtype)),
+            dtype=int)
+
+        # Nettoyer les -1 (labels absents, ne devrait pas arriver mais ceinture+bretelles)
+        idx_ruptures = idx_ruptures[idx_ruptures >= 0]
+        idx_reprises = idx_reprises[idx_reprises >= 0]
+
+        temps = df['temps_relatif_ms'].to_numpy()
+
+        for pos in positions_list:
+            for r in roles_list:
+                # Colonnes selon le rôle et la position
+                if r == 'A':
+                    col_acc = f'acc_A_vers_B_{pos}'
+                    col_v   = f'vitesse_A_vers_B_{pos}'
+                    col_x   = f'A-{pos[0]}X'
+                    col_y   = f'A-{pos[0]}Y'
+                else:
+                    col_acc = f'acc_B_vers_A_{pos}'
+                    col_v   = f'vitesse_B_vers_A_{pos}'
+                    col_x   = f'B-{pos[1]}X'
+                    col_y   = f'B-{pos[1]}Y'
+
+                if col_v not in df.columns:
+                    continue
+
+                groupes = []
+                if not taches_tuple[1]:
+                    groupes.append(tache)
+                if not conditions_tuple[1]:
+                    groupes.append(cond)
+                if not positions_tuple[1]:
+                    groupes.append(pos)
+                if not roles_tuple[1]:
+                    groupes.append(r)
+
+                cle = '_'.join(groupes) if groupes else ''
+
+                if cle not in donnees:
+                    donnees[cle] = {
+                        'temps': [], 'acc': [], 'v': [], 'x': [], 'y': [],
+                        'ruptures': [], 'reprises': [],
+                    }
+
+                donnees[cle]['temps'].append(temps)
+                donnees[cle]['acc'].append(df[col_acc].to_numpy() if col_acc in df.columns else np.full(len(df), np.nan))
+                donnees[cle]['v'].append(df[col_v].to_numpy())
+                donnees[cle]['x'].append(df[col_x].to_numpy() if col_x in df.columns else np.full(len(df), np.nan))
+                donnees[cle]['y'].append(df[col_y].to_numpy() if col_y in df.columns else np.full(len(df), np.nan))
+                donnees[cle]['ruptures'].append(temps[idx_ruptures])
+                donnees[cle]['reprises'].append(temps[idx_reprises])
+
     return donnees
 
 # Extraire les fenêtres
-donnees = extraire_fenetres(
-    donnees_preparees,
-    taches_tuple,
-    conditions_tuple,
-    positions_tuple,
-    type_events_tuple,
-    roles_tuple,
-    essai,
-    evenement,
-    fenetre_avant,
-    fenetre_apres,
-    pas_direction
-)
+if periode == "Evenement":
+    donnees = extraire_fenetres(
+        donnees_preparees, taches_tuple, conditions_tuple, positions_tuple,
+        type_events_tuple, roles_tuple, essai, evenement,
+        fenetre_avant, fenetre_apres, pas_direction
+    )
+else:
+    donnees = extraire_essai(donnees_preparees, taches_tuple, conditions_tuple, positions_tuple, roles_tuple, essai, pas_direction)
 
 # --- Dictionnaire de traduction pour l'affichage ---
 LABELS_LISIBLES = {
@@ -626,7 +735,7 @@ else:
     couleurs = {cle: palette[i] for i, cle in enumerate(cles_triees)}
 
     # --- Figure ---
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
+    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(14, 18), sharex=True)
     
     # --- Boucle sur les groupes ---
     for cle in cles_triees:
@@ -658,13 +767,44 @@ else:
         acc_sem = acc_std / np.sqrt(n_obs_safe)
         v_sem = v_std / np.sqrt(n_obs_safe)
 
-        if lisse :
+        # --- Matrices pour x et y ---
+        fenetres_x = data['x']
+        fenetres_y = data['y']
+
+        n_max_x = max(len(f) for f in fenetres_x) if fenetres_x else n_max
+        n_max_y = max(len(f) for f in fenetres_y) if fenetres_y else n_max
+
+        x_mat = np.full((len(fenetres_x), n_max_x), np.nan)
+        y_mat = np.full((len(fenetres_y), n_max_y), np.nan)
+
+        for i, (xx, yy) in enumerate(zip(fenetres_x, fenetres_y)):
+            x_mat[i, :len(xx)] = xx
+            y_mat[i, :len(yy)] = yy
+
+        x_moy = np.nanmean(x_mat, axis=0)
+        y_moy = np.nanmean(y_mat, axis=0)
+
+        x_std = np.nanstd(x_mat, axis=0)
+        y_std = np.nanstd(y_mat, axis=0)
+        n_obs_x = np.sum(~np.isnan(x_mat), axis=0)
+        n_obs_y = np.sum(~np.isnan(y_mat), axis=0)
+        x_sem = x_std / np.sqrt(np.where(n_obs_x > 0, n_obs_x, 1))
+        y_sem = y_std / np.sqrt(np.where(n_obs_y > 0, n_obs_y, 1))
+
+        if lisse:
             acc_moy = lisser(acc_moy)
             v_moy = lisser(v_moy)
             acc_sem = lisser(acc_sem)
             v_sem = lisser(v_sem)
-        
-        # --- Temps ---
+            x_moy = lisser(x_moy)
+            y_moy = lisser(y_moy)
+            x_sem = lisser(x_sem)
+            y_sem = lisser(y_sem)
+
+        # Temps pour x et y (peut différer de celui d'acc/v si tailles différentes)
+        temps_x = np.arange(n_max_x) * 10 - fenetre_avant
+        temps_y = np.arange(n_max_y) * 10 - fenetre_avant
+
         temps = np.arange(n_max) * 10 - fenetre_avant
         
         # --- Couleur et label ---
@@ -676,19 +816,27 @@ else:
             if label.find('Souris-Souris') >= 0:
                 ax1.plot(temps, acc_moy, color=couleur, linewidth=2, linestyle='--', label=f'{label} (n={len(fenetres_acc)})')
                 ax2.plot(temps, v_moy, color=couleur, linewidth=2, linestyle='--', label=f'{label} (n={len(fenetres_v)})')
+                ax3.plot(temps_x, x_moy, color=couleur, linewidth=2, linestyle='--', label=f'{label} (n={len(fenetres_x)})')
+                ax4.plot(temps_y, y_moy, color=couleur, linewidth=2, linestyle='--', label=f'{label} (n={len(fenetres_y)})')
 
             else :
                 ax1.plot(temps, acc_moy, color=couleur, linewidth=2, label=f'{label} (n={len(fenetres_acc)})')
                 ax2.plot(temps, v_moy, color=couleur, linewidth=2, label=f'{label} (n={len(fenetres_v)})')
+                ax3.plot(temps_x, x_moy, color=couleur, linewidth=2, label=f'{label} (n={len(fenetres_x)})')
+                ax4.plot(temps_y, y_moy, color=couleur, linewidth=2, label=f'{label} (n={len(fenetres_y)})')
 
             ax1.fill_between(temps, acc_moy - acc_sem, acc_moy + acc_sem, color=couleur, alpha=0.15)
             ax2.fill_between(temps, v_moy - v_sem, v_moy + v_sem, color=couleur, alpha=0.15)
+            ax3.fill_between(temps_x, x_moy - x_sem, x_moy + x_sem, color=couleur, alpha=0.15)
+            ax4.fill_between(temps_y, y_moy - y_sem, y_moy + y_sem, color=couleur, alpha=0.15) 
 
         else:
             pas = max(1, echantillon // 10)
             points_temps = []
             points_acc = []
             points_v = []
+            points_x = []
+            points_y = []
             
             for a, v in zip(fenetres_acc, fenetres_v):
                 n = len(a)
@@ -697,6 +845,11 @@ else:
                 points_temps.extend(t_fenetre[idx_sous])
                 points_acc.extend(a[idx_sous])
                 points_v.extend(v[idx_sous])
+            for xx, yy in zip(fenetres_x, fenetres_y):
+                n = len(xx)
+                idx_sous = np.arange(0, n, pas)
+                points_x.extend(xx[idx_sous])
+                points_y.extend(yy[idx_sous])
 
             if not extremes:
                 points_temps = np.array(points_temps)
@@ -715,12 +868,10 @@ else:
                 points_acc = points_acc[masque]
                 points_v = points_v[masque]
             
-            ax1.scatter(points_temps, points_acc,
-                        color=couleur, alpha=0.3, s=5,
-                        label=f'{label} (n={len(fenetres_acc)})')
-            ax2.scatter(points_temps, points_v,
-                        color=couleur, alpha=0.3, s=5,
-                        label=f'{label} (n={len(fenetres_v)})')
+            ax1.scatter(points_temps, points_acc, color=couleur, alpha=0.3, s=5, label=f'{label} (n={len(fenetres_acc)})')
+            ax2.scatter(points_temps, points_v, color=couleur, alpha=0.3, s=5, label=f'{label} (n={len(fenetres_v)})')
+            ax3.scatter(points_temps[:len(points_x)], points_x, color=couleur, alpha=0.3, s=5, label=f'{label} (n={len(fenetres_x)})')
+            ax4.scatter(points_temps[:len(points_y)], points_y, color=couleur, alpha=0.3, s=5, label=f'{label} (n={len(fenetres_y)})')
         
         # --- BARRES VERTICALES DES PROCHAINS ÉVÉNEMENTS ---
         if prochains:
@@ -745,10 +896,24 @@ else:
                             alpha=0.6, linewidth=1.5)
 
     # --- Lignes de référence ---
-    ax1.axvline(0, color='red', linestyle='--', alpha=1)
-    ax2.axvline(0, color='red', linestyle='--', alpha=1)
+    if periode == 'Evenement':
+        for ax in (ax1, ax2, ax3, ax4):
+            ax.axvline(0, color='red', linestyle='--', alpha=1)
     ax1.axhline(0, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
     ax2.axhline(0, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
+    ax3.axhline(Config.ESPACE_X/2, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
+    ax4.axhline(Config.ESPACE_Y/2, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
+
+    if periode == 'Essai':
+        # --- BARRES VERTICALES DES RUPTURES/REPRISES (mode Essai) ---
+        ruptures = data.get('ruptures', [[]])[0] if data.get('ruptures') else []
+        reprises = data.get('reprises', [[]])[0] if data.get('reprises') else []
+        for t in ruptures:
+            for ax in (ax1, ax2, ax3, ax4):
+                ax.axvline(t, color='red', linestyle='--', alpha=0.5, linewidth=1)
+        for t in reprises:
+            for ax in (ax1, ax2, ax3, ax4):
+                ax.axvline(t, color='green', linestyle='-', alpha=0.5, linewidth=1)
     
     # --- Labels ---
     ax1.set_ylabel('Accélération (px/ms²)', fontsize=12)
@@ -762,17 +927,30 @@ else:
     ax2.grid(True, alpha=0.3)
     ax2.legend(loc='upper right', fontsize=12)
 
-    # --- Ajustement des limites Y ---
-    def ajuster_limites(ax, marge=0.05):
-        ymin, ymax = ax.get_ylim()
-        amplitude = max(abs(ymin), abs(ymax))
-        if amplitude == 0:
-            amplitude = 1
-        amplitude *= (1 + marge)
-        ax.set_ylim(-amplitude, amplitude)
+    ax3.set_ylabel('Position x (px)', fontsize=12)
+    ax3.set_title('Position x', fontsize=13)
+    ax3.grid(True, alpha=0.3)
+    ax3.legend(loc='upper right', fontsize=12)
 
-    ajuster_limites(ax1)
-    ajuster_limites(ax2)
+    ax4.set_ylabel('Position y (px)', fontsize=12)
+    ax4.set_xlabel('Temps relatif (ms)' if periode == 'Evenement' else 'Temps (ms)', fontsize=12)
+    ax4.set_title('Position y', fontsize=13)
+    ax4.grid(True, alpha=0.3)
+    ax4.legend(loc='upper right', fontsize=12)
+
+    # --- Ajustement des limites Y ---
+    def ajuster_limites(ax, centre, marge=0.05):
+        ymin, ymax = ax.get_ylim()
+        demi = max(centre - ymin, ymax - centre)
+        if demi == 0:
+            demi = 1
+        demi *= (1 + marge)
+        ax.set_ylim(centre - demi, centre + demi)
+
+    ajuster_limites(ax1, 0)
+    ajuster_limites(ax2, 0)
+    ajuster_limites(ax3, Config.ESPACE_X/2)
+    ajuster_limites(ax4, Config.ESPACE_Y/2)
     
     plt.tight_layout()
     st.pyplot(fig, width="stretch")
@@ -785,29 +963,30 @@ else:
     st.download_button(
         label="📂 Télécharger le graphique", data=buf, mime="image/png")
 
-    # ANIMATION RÉACTION À UN OBJET FIXE
-    with st.subheader("Animations de la réaction"):
-        onglets = st.tabs([traduire(c) or "Toutes" for c in cles_triees])
-        for onglet, c in zip(onglets, cles_triees):
-            with onglet:
-                gif_buf = construire_gif_reaction(fenetres_v=donnees[c]['v'], fenetre_avant_ms=fenetre_avant, pas_direction_ms=10, titre=traduire(c), fps=100,)
-                if gif_buf is None:
-                    st.info("Pas de données pour cette sélection.")
-                else:
-                    st.image(gif_buf, width="stretch")
-                    gif_buf.seek(0)
-                    st.download_button(label="📂 Télécharger l'animation", data=gif_buf, mime="image/gif", file_name=f"animation_{c or 'toutes'}.gif", key=f"dl_gif_{c}",)
+    if periode == 'Evenement':
+        # ANIMATION RÉACTION À UN OBJET FIXE
+        with st.subheader("Animations de la réaction"):
+            onglets = st.tabs([traduire(c) or "Toutes" for c in cles_triees])
+            for onglet, c in zip(onglets, cles_triees):
+                with onglet:
+                    gif_buf = construire_gif_reaction(fenetres_v=donnees[c]['v'], fenetre_avant_ms=fenetre_avant, pas_direction_ms=10, titre=traduire(c), fps=100,)
+                    if gif_buf is None:
+                        st.info("Pas de données pour cette sélection.")
+                    else:
+                        st.image(gif_buf, width="stretch")
+                        gif_buf.seek(0)
+                        st.download_button(label="📂 Télécharger l'animation", data=gif_buf, mime="image/gif", file_name=f"animation_{c or 'toutes'}.gif", key=f"dl_gif_{c}",)
 
-    # ============================================================
-    # STATISTIQUES
-    # ============================================================
-    
-    st.subheader("Statistiques")
-    
-    idx_event = fenetre_avant // 10
-    
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Acc avant (px/s²)", f"{np.nanmean(acc_moy[:idx_event]) * 1e6:.2f}")
-    col2.metric("Acc après (px/s²)", f"{np.nanmean(acc_moy[idx_event+40:]) * 1e6:.2f}")
-    col3.metric("V avant (px/s)", f"{np.nanmean(v_moy[:idx_event]) * 1000:.2f}")
-    col4.metric("V après (px/s)", f"{np.nanmean(v_moy[idx_event+20:]) * 1000:.2f}")
+        # ============================================================
+        # STATISTIQUES
+        # ============================================================
+        
+        st.subheader("Statistiques")
+        
+        idx_event = fenetre_avant // 10
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Acc avant (px/s²)", f"{np.nanmean(acc_moy[:idx_event]) * 1e6:.2f}")
+        col2.metric("Acc après (px/s²)", f"{np.nanmean(acc_moy[idx_event+40:]) * 1e6:.2f}")
+        col3.metric("V avant (px/s)", f"{np.nanmean(v_moy[:idx_event]) * 1000:.2f}")
+        col4.metric("V après (px/s)", f"{np.nanmean(v_moy[idx_event+20:]) * 1000:.2f}")
