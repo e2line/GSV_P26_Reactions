@@ -34,7 +34,7 @@ st.title("Analyse temporelle des réactions")
 # ============================================================
 # CHARGEMENT
 # ============================================================
-@st.cache_data(show_spinner="Préparation des données…", max_entries=2)
+@st.cache_data(show_spinner="Préparation des données…", max_entries=2, ttl=3600)
 def preparer_donnees(taches_lst, conditions_par_tache, positions_lst, pas_direction):
     """
     Vérifie que le cache existe pour chaque tâche sélectionnée, le construit
@@ -68,7 +68,7 @@ def preparer_donnees(taches_lst, conditions_par_tache, positions_lst, pas_direct
     return donnees
 
 # LISTE DES ESSAIS
-@st.cache_data
+@st.cache_data(max_entries=2, ttl=3600)
 def lister_essais(taches_lst: list[str], cond_lst: list[str]):
     essais = []
     for tache in taches_lst:
@@ -82,7 +82,7 @@ def lister_essais(taches_lst: list[str], cond_lst: list[str]):
     return pd.DataFrame(essais)
 
 
-@st.cache_data
+@st.cache_data(max_entries=2, ttl=3600)
 def lister_evenements(essai, type_event, tache, cond):
     if essai == 'Tous':
         return ['Tous']
@@ -333,7 +333,7 @@ donnees_preparees = preparer_donnees(
 # EXTRACTION DES FENÊTRES
 # ============================================================
 
-@st.cache_data
+@st.cache_data(max_entries=2, ttl=3600)
 def extraire_fenetres(_donnees_preparees, taches_tuple, conditions_tuple, positions_tuple, type_events_tuple,
                        roles_tuple, essai_filtre, evenement_filtre,
                        fenetre_avant_ms, fenetre_apres_ms, pas_direction):
@@ -479,7 +479,7 @@ def extraire_fenetres(_donnees_preparees, taches_tuple, conditions_tuple, positi
     return donnees
 
 
-@st.cache_data
+@st.cache_data(max_entries=2, ttl=3600)
 def extraire_essai(_donnees_preparees, taches_tuple, conditions_tuple, positions_tuple, roles_tuple, essai_filtre, pas_direction):
     """Retourne, pour chaque groupe, les séries complètes + les évènements."""
     positions_list = positions_tuple[0]
