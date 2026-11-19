@@ -34,7 +34,7 @@ st.title("Analyse temporelle des réactions")
 # ============================================================
 # CHARGEMENT
 # ============================================================
-@st.cache_data(show_spinner="Préparation des données…")
+@st.cache_data(show_spinner="Préparation des données…", max_entries=2)
 def preparer_donnees(taches_lst, conditions_par_tache, positions_lst, pas_direction):
     """
     Vérifie que le cache existe pour chaque tâche sélectionnée, le construit
