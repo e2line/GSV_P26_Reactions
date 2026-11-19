@@ -146,136 +146,7 @@ def comparer_courbes(donnees, cles, fenetre_avant):
                 'corr_v': np.corrcoef(v1, v2)[0, 1] if n > 2 else np.nan,
             })
     return pd.DataFrame(resultats)
-
-
-def construire_gif_reaction(fenetres_v, fenetre_avant_ms, pas_direction_ms, titre="", fps=100, rayon_corps_percu=20.0, rayon_corps_percevant=50.0, taille_case=20.0, n_cases=4, distance_initiale=60.0):
-    """
-    Construit un GIF (BytesIO) modélisant la réaction radiale d'un individu
-    à un objet fixe, à partir des vitesses signées (px/ms).
-
-    Paramètres
-    ----------
-    fenetres_v : list[np.ndarray]
-        Liste des fenêtres de vitesse signée (px/ms), une par essai.
-    fenetre_avant_ms : int
-        Durée de la fenêtre avant l'évènement (ms).
-    pas_direction_ms : int
-        Pas d'échantillonnage temporel (ms), typiquement 10.
-    titre : str
-        Titre affiché sur la figure.
-    fps : int
-        Images par seconde du GIF.
-    rayon_corps : float
-        Rayon du corps perçu (px).
-    taille_case : float
-        Côté d'une case de la matrice de l'objet (px).
-    n_cases : int
-        Nombre de cases par côté (matrice n_cases × n_cases).
-    distance_initiale : float
-        Distance centre-à-centre à t=0 (px).
-
-    Retour
-    ------
-    BytesIO ou None
-        Buffer du GIF prêt à être lu, ou None si aucune donnée exploitable.
-    """
-    if not fenetres_v:
-        return None
-
-    dt = float(pas_direction_ms)
-
-    # --- Vitesse moyenne sur la grille de temps ---
-    n_max = max(len(v) for v in fenetres_v)
-    v_mat = np.full((len(fenetres_v), n_max), np.nan)
-    for i, v in enumerate(fenetres_v):
-        v_mat[i, :len(v)] = v
-    v_moy = np.nanmean(v_mat, axis=0)
-
-    temps_ms = np.arange(n_max) * dt - fenetre_avant_ms
-    idx_zero = int(np.argmin(np.abs(temps_ms)))
-
-    # --- Reconstruction de la distance radiale ---
-    # Convention : v < 0 = approche, v > 0 = éloignement
-    distances = np.full(n_max, np.nan)
-    distances[idx_zero] = distance_initiale
-
-    for i in range(idx_zero + 1, n_max):
-        distances[i] = (distances[i-1] if np.isnan(v_moy[i])
-                        else distances[i-1] - v_moy[i] * dt)
-    for i in range(idx_zero - 1, -1, -1):
-        distances[i] = (distances[i+1] if np.isnan(v_moy[i+1])
-                        else distances[i+1] + v_moy[i+1] * dt)
-    distances = np.clip(distances, 0, None)
-
-    # --- Préparation de la figure ---
-    taille_grille = taille_case * n_cases
-    d_max = max(200.0, float(np.nanmax(distances)) + 60.0)
-
-    fig_anim, ax = plt.subplots(figsize=(8, 4))
-
-    couleur_case_A = '#E88A2E'
-    couleur_case_B = '#B5651D'
-    for i in range(n_cases):
-        for j in range(n_cases):
-            x0 = -taille_grille/2 + j * taille_case
-            y0 = -taille_grille/2 + i * taille_case
-            couleur = couleur_case_A if (i + j) % 2 == 0 else couleur_case_B
-            ax.add_patch(Rectangle((x0, y0), taille_case, taille_case,
-                                   facecolor=couleur, edgecolor='white',
-                                   linewidth=0.5, zorder=1))
-
-    ax.add_patch(Circle((0, 0), rayon_corps_percevant, fill=False, edgecolor='purple', linewidth=1.2, linestyle='--', zorder=2))
-    ax.add_patch(Circle((0, 0), rayon_corps_percu, facecolor='blue', edgecolor='none', zorder=3))
-
-    individu_patch = Circle((distance_initiale, 0), rayon_corps_percu, facecolor='blue', edgecolor='none', linewidth=1.5, zorder=4)
-    ax.add_patch(individu_patch)
-
-    ligne_contact, = ax.plot([], [], color='gray', linestyle=':',
-                             linewidth=1, alpha=0.6, zorder=0)
-    txt_info = ax.text(0.02, 0.95, '', transform=ax.transAxes,
-                       verticalalignment='top', fontsize=10,
-                       family='monospace',
-                       bbox=dict(boxstyle='round', facecolor='white',
-                                 alpha=0.8))
-
-    ax.set_title(titre, fontsize=12)
-    ax.set_xlim(-d_max, d_max)
-    ax.set_ylim(-d_max * 0.3, d_max * 0.3)
-    ax.set_aspect('equal')
-    ax.axhline(0, color='gray', linewidth=0.5, alpha=0.5)
-    ax.set_xlabel('Position x (px)')
-    ax.set_yticks([])
-
-    def update(frame_idx):
-        d = distances[frame_idx]
-        t = temps_ms[frame_idx]
-        v = v_moy[frame_idx] if not np.isnan(v_moy[frame_idx]) else 0.0
-
-        individu_patch.center = (d, 0)
-        ligne_contact.set_data([0, d], [0, 0])
-        if v < -0.01:
-            ligne_contact.set_color('green')
-        elif v > 0.01:
-            ligne_contact.set_color('red')
-        else:
-            ligne_contact.set_color('gray')
-
-        txt_info.set_text(f"t = {t:+.0f} ms\nd = {d:.1f} px\nv = {v:+.3f} px/ms")
-        return individu_patch, ligne_contact, txt_info
-
-    anim = FuncAnimation(fig_anim, update, frames=n_max, interval=1000 // fps, blit=True)
-
-    # PillowWriter exige un chemin de fichier : on passe par un fichier temporaire
-    buf_gif = io.BytesIO()
-    with tempfile.TemporaryDirectory() as tmpdir:
-        chemin_tmp = os.path.join(tmpdir, "anim.gif")
-        anim.save(chemin_tmp, writer=PillowWriter(fps=fps))
-        with open(chemin_tmp, "rb") as f:
-            buf_gif.write(f.read())
-
-    buf_gif.seek(0)
-    plt.close(fig_anim)
-    return buf_gif
+    
 
 # ============================================================
 # SIDEBAR
@@ -962,6 +833,7 @@ else:
     
     plt.tight_layout()
     st.pyplot(fig, width="stretch")
+    plt.close(fig)
 
     # Bouton pour enregistrer
     buf = io.BytesIO()
@@ -970,31 +842,3 @@ else:
 
     st.download_button(
         label="📂 Télécharger le graphique", data=buf, mime="image/png")
-
-    if periode == 'Evenement':
-        # ANIMATION RÉACTION À UN OBJET FIXE
-        with st.subheader("Animations de la réaction"):
-            onglets = st.tabs([traduire(c) or "Toutes" for c in cles_triees])
-            for onglet, c in zip(onglets, cles_triees):
-                with onglet:
-                    gif_buf = construire_gif_reaction(fenetres_v=donnees[c]['v'], fenetre_avant_ms=fenetre_avant, pas_direction_ms=10, titre=traduire(c), fps=100,)
-                    if gif_buf is None:
-                        st.info("Pas de données pour cette sélection.")
-                    else:
-                        st.image(gif_buf, width="stretch")
-                        gif_buf.seek(0)
-                        st.download_button(label="📂 Télécharger l'animation", data=gif_buf, mime="image/gif", file_name=f"animation_{c or 'toutes'}.gif", key=f"dl_gif_{c}",)
-
-        # ============================================================
-        # STATISTIQUES
-        # ============================================================
-        
-        st.subheader("Statistiques")
-        
-        idx_event = fenetre_avant // 10
-        
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Acc avant (px/s²)", f"{np.nanmean(acc_moy[:idx_event]) * 1e6:.2f}")
-        col2.metric("Acc après (px/s²)", f"{np.nanmean(acc_moy[idx_event+40:]) * 1e6:.2f}")
-        col3.metric("V avant (px/s)", f"{np.nanmean(v_moy[:idx_event]) * 1000:.2f}")
-        col4.metric("V après (px/s)", f"{np.nanmean(v_moy[idx_event+20:]) * 1000:.2f}")
