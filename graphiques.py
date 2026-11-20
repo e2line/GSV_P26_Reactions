@@ -341,6 +341,7 @@ if mode_affichage == 'Nuage de points':
 else:
     extremes = True
     lisse = st.checkbox(label="Lisser la courbe", value = True)
+
 periode = st.sidebar.radio("Période d'affichage :", ['Evenement', 'Essai'], index=0)
 
 prochains = False
@@ -349,10 +350,14 @@ if periode=='Evenement':
 
 st.sidebar.header("Paramètres")
 
+projections = {}
 st.sidebar.subheader("Tâche (défaut=Toutes)")
 gsv = st.sidebar.checkbox("GSV")
+projections["GSV"] = st.sidebar.radio("Choix projection des vitesses :", ["Vers l'autre", "Vers la cible"], index=0)
 bst = st.sidebar.checkbox("BST")
+projections["BST"] = st.sidebar.radio("Choix projection des vitesses :", ["Vers l'autre", "Vers la bestiole"], index=0)
 col = st.sidebar.checkbox("COL")
+projections["COL"] = st.sidebar.radio("Choix projection des vitesses :", ["Vers l'autre", "Vers la colline"], index=0)
 
 taches_list = []
 if gsv: taches_list.append('GSV')
@@ -381,15 +386,15 @@ if taches_list == ['GSV']:
     gs = st.sidebar.checkbox('Guide-Suiveur')
     gg = st.sidebar.checkbox('Guide-Guide')
     if gs and not gg:
-        st.sidebar.subheader("Rôles (défaut=Tous)")
+        st.sidebar.subheader("Sujets (défaut=Tous)")
         role1 = st.sidebar.checkbox('Guide', False)
         role2 = st.sidebar.checkbox('Suiveur', False)
     elif gg and not gs:
-        st.sidebar.subheader("Individus (défaut=Tous)")
+        st.sidebar.subheader("Sujets (défaut=Tous)")
         role1 = st.sidebar.checkbox('Guide A', False)
         role2 = st.sidebar.checkbox('Guide B', False)
     else:
-        st.sidebar.subheader("Individus (défaut=Tous)")
+        st.sidebar.subheader("Sujets (défaut=Tous)")
         role1 = st.sidebar.checkbox('Guide/Guide A', False)
         role2 = st.sidebar.checkbox('Suiveur/Guide B', False)
 
@@ -400,35 +405,47 @@ elif len(taches_list) == 1:
 
 
 st.sidebar.subheader("Conditions (défaut=Toutes)")
-conditions_list = []
-toutes_conditions = []
-conditions_par_tache = {}
+conds_dispo_par_tache = {}
+conds_choisies_par_tache = {}
 for tache in taches_list:
     st.sidebar.markdown(f"**{tache}**")
     # Charger la config de la tâche pour connaître ses conditions
     try:
         module = importlib.import_module(f"taches.{tache}.config_{tache}")
         classe = getattr(module, f"Config_{tache}")
-        conds_tache = classe.CONDITIONS
+        conds_tache = list(classe.CONDITIONS)
     except (ModuleNotFoundError, AttributeError):
         st.sidebar.warning(f"Config {tache} introuvable")
         conds_tache = []
-    
-    conds_choisies = [
+
+    conds_dispo_par_tache[tache] = conds_tache
+    conds_choisies_par_tache[tache] = [
         c for c in conds_tache
         if st.sidebar.checkbox(c, key=f"cond_{tache}_{c}")
     ]
-    conditions_par_tache[tache] = conds_choisies or conds_tache
-    conditions_list += conds_choisies
-    toutes_conditions += conds_tache
 
-conditions_list = uniques(conditions_list)
-toutes_conditions = uniques(toutes_conditions)
-if not conditions_list:
+# Règle de sélection :
+#  - aucune condition cochée           -> toutes les conditions de toutes les tâches ;
+#  - tâche avec des conditions cochées -> seulement celles-là ;
+#  - tâche sans condition cochée       -> toutes ses conditions si la tâche est cochée
+#    explicitement, sinon la tâche est exclue.
+aucune_condition = not any(conds_choisies_par_tache.values())
+conditions_par_tache = {}
+for tache in taches_list:
+    choisies = conds_choisies_par_tache[tache]
+    if choisies:
+        conditions_par_tache[tache] = choisies
+    elif aucune_condition or not taches_tuple[1]:
+        conditions_par_tache[tache] = conds_dispo_par_tache[tache]
+    else:
+        conditions_par_tache[tache] = []
+
+toutes_conditions = uniques([c for t in taches_list for c in conds_dispo_par_tache[t]])
+if aucune_condition:
     conditions_list = toutes_conditions
-    conditions_tuple = (conditions_list, True)
 else:
-    conditions_tuple = (conditions_list, False)
+    conditions_list = uniques([c for t in taches_list for c in conds_choisies_par_tache[t]])
+conditions_tuple = (conditions_list, aucune_condition)
 
 
 # ============================================================
@@ -468,7 +485,7 @@ else:
     roles_tuple = (ROLES, True)
 
 # Essai
-df_essais = lister_essais(taches_list, conditions_list)
+df_essais = lister_essais(conditions_par_tache)
 if 'essai' in df_essais.columns:
     essais_disponibles = ['Tous'] + sorted(df_essais['essai'].unique().tolist())
 else:
@@ -502,11 +519,20 @@ else:
 # Pas direction
 pas_direction = st.sidebar.slider("Fenêtre glissante d'enregistrement de la vitesse (ms)", 40, 500, 200, 20, help="Temps entre les enregistrements des positions d'un individu pour le calcul de la vitesse") //10
 
+taches_effectives = [t for t in taches_list if conditions_par_tache[t]]
 
-donnees_preparees = preparer_donnees(
+donnees_preparees = calculer_moyennes(
     sorted(taches_list),
     conditions_par_tache,
     tuple(positions_list),
+    projections,
+    tuple(type_events_list)
+    tuple(roles_list)
+    periode,
+    essai_filtre,
+    evenement_filtre,
+    fenetre_avant_ms,
+    fenetre_apres_ms,
     pas_direction
 )
 # ============================================================
@@ -734,24 +760,14 @@ def extraire_essai(_donnees_preparees, taches_tuple, conditions_tuple, positions
 
     return donnees
 
-# Extraire les fenêtres
-if periode == "Evenement":
-    donnees = extraire_fenetres(
-        donnees_preparees, taches_tuple, conditions_tuple, positions_tuple,
-        type_events_tuple, roles_tuple, essai, evenement,
-        fenetre_avant, fenetre_apres, pas_direction
-    )
-else:
-    donnees = extraire_essai(donnees_preparees, taches_tuple, conditions_tuple, positions_tuple, roles_tuple, essai, pas_direction)
-
 # --- Dictionnaire de traduction pour l'affichage ---
 LABELS_LISIBLES = {
     'tt': 'Curseur-Curseur',
     'rt': 'Souris guide-Curseur suiveur',
     'tr': 'Curseur guide-Souris suiveur',
     'rr': 'Souris-Souris',
-    'A': 'Guide',
-    'B': 'Suiveur',
+    'A': 'A',
+    'B': 'B',
     'rupture': 'Ruptures',
     'reprise': 'Reprises',
     'BB': 'BB', 'BH': 'BH', 'HB': 'HB', 'HH': 'HH',
@@ -760,9 +776,12 @@ if taches_list == ['GSV']:
     if gg and not gs:
         LABELS_LISIBLES['A'] = 'Guide A'
         LABELS_LISIBLES['B'] = 'Guide B'
-    else :
+    elif gs and not gg :
         LABELS_LISIBLES['A'] = 'Guide'
         LABELS_LISIBLES['B'] = 'Suiveur'
+    else :
+        LABELS_LISIBLES['A'] = 'Guide/Guide A'
+        LABELS_LISIBLES['B'] = 'Suiveur/Guide B'
 
 def traduire(cle):
     if not cle:
@@ -772,6 +791,26 @@ def traduire(cle):
 
 def lisser(y, largeur=4):
     return pd.Series(y).rolling(largeur, center=True, min_periods=1).mean().to_numpy()
+
+
+# STYLE DES COURBES
+# Code sémantique :
+#   - individu : A = teinte chaude, B = teinte froide, neutre (gris) si A et B sont fusionnés
+#   - support  : curseur = trait plein, souris = pointillé (marqueur 'x' en nuage de points)
+#   - grandeur : x et y = sombre, vitesse = intermédiaire, accélération = clair
+#                (chaque grandeur est sur son propre graphique : la nuance ne compte
+#                 donc pas pour distinguer deux courbes entre elles)
+# Il est utilisé si chaque courbe a une identité (individu, support) différente de celle
+# des autres ; sinon on garde la palette tab10/tab20 d'origine (même couleur sur les 4 graphiques).
+# Palettes par individu : teintes en degrés (0..360)
+PALETTE_TEINTES = {
+    'A': [210, 230, 250],           # bleu, violet (froid)
+    'B': [0, 20, 40],              # orange, rouge (chaud)
+    None: [0],                 # gris (non utilisé, sat=0)
+}
+LUM = {'x': 0.30, 'y': 0.30, 'dif': 0.45, 'proj': 0.45, 'v': 0.60, 'acc': 0.75}  # sombre / intermédiaire / clair
+SAT = 0.75
+STYLE_SUPPORT = {'curseur': ('-', 'o'), 'souris': ('--', 'x'), None: ('-', 'o')}
 
 # ============================================================
 # AFFICHAGE
