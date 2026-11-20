@@ -34,38 +34,218 @@ st.title("Analyse temporelle des réactions")
 # ============================================================
 # CHARGEMENT
 # ============================================================
-@st.cache_data(show_spinner="Préparation des données…", max_entries=2, ttl=3600)
-def preparer_donnees(taches_lst, conditions_par_tache, positions_lst, pas_direction):
-    """
-    Vérifie que le cache existe pour chaque tâche sélectionnée, le construit
-    si nécessaire, puis enrichit chaque essai avec les colonnes calculées
-    (vitesse signée, accélération, etc.) pour les positions demandées.
+@st.cache_data(max_entries=2, ttl=3600, show_spinner="Calcul des moyennes…")
+def calculer_moyennes(taches_lst, conditions_par_tache, positions_lst, projections,
+                      type_events_tuple, roles_tuple, periode, essai_filtre,
+                      evenement_filtre, fenetre_avant_ms, fenetre_apres_ms, pas_direction):
+    # ========== 1) CHARGEMENT + ENRICHISSEMENT + EXTRACTION ==========
+    n_avant = int(fenetre_avant_ms / 10)
+    n_apres = int(fenetre_apres_ms / 10)
+    type_events_list = type_events_tuple[0]
+    roles_list = roles_tuple[0]
 
-    Retourne un dict :
-        { (tache, condition, essai) : df_enrichi }
-    """
-    donnees = {}
+    # Accumulateur : { cle: { 'temps': [], 'acc': [], 'v': [], ... } }
+    bruts = {}
+
     for tache in taches_lst:
+        proj_intersujets = (projections[tache] == "Vers l'autre")
         Config.charger_tache(tache)
-        cache_tache = Path(CACHE_DIR/tache)
+        cache_tache = Path(Config.CACHE_DIR)
         if not cache_tache.exists():
-            # Construire le cache pour cette tâche
             construire_charger_cache(force_reload=False, tronquer_debut=True)
 
-        # Parcourir les conditions demandées
         for cond in conditions_par_tache[tache]:
-            chemin_cond = Path(CACHE_DIR) /tache / cond
+            chemin_cond = Path(Config.CACHE_DIR) / cond
             if not chemin_cond.exists():
-                continue   # condition absente pour cette tâche, on saute
+                continue
+
+            # Métadonnées (une fois par condition)
+            chemin_meta = chemin_cond / "metadatas.json"
+            metas = {}
+            if chemin_meta.exists() and Config.TACHE == 'GSV':
+                with open(chemin_meta, encoding="utf-8") as f:
+                    metas = json.load(f)
 
             for fichier in chemin_cond.glob("*.parquet"):
                 essai = fichier.stem
-                df = pd.read_parquet(fichier)
-                for pos in positions_lst:
-                    df = enrichir_dataframe(df, pos, pas_direction)
-                donnees[(tache, cond, essai)] = df
+                if essai_filtre != 'Tous' and essai != essai_filtre:
+                    continue
 
-    return donnees
+                df = pd.read_parquet(fichier)
+                if 'contact_AB' not in df.columns:
+                    continue
+
+                # Cibles pour GSV
+                cible_A = cible_B = None
+                if Config.TACHE == 'GSV':
+                    meta = metas.get(essai, {})
+                    ca = (meta.get('cible_A_x'), meta.get('cible_A_y'))
+                    cb = (meta.get('cible_B_x'), meta.get('cible_B_y'))
+                    cible_A = ca if ca[0] is not None and ca[1] is not None else None
+                    cible_B = cb if cb[0] is not None and cb[1] is not None else None
+
+                # Enrichir
+                for pos in positions_lst:
+                    df = enrichir_dataframe_graphique(
+                        df, pos, Config.TACHE, proj_intersujets,
+                        cible_A, cible_B, pas_direction)
+
+                # Détecter les évènements
+                idx_ruptures, idx_reprises = detecter_ruptures_contact(
+                    df, 'contact_AB', col_temps='temps_relatif_ms')
+                tous_les_evenements = (
+                    [(idx, 'rupture') for idx in idx_ruptures] +
+                    [(idx, 'reprise') for idx in idx_reprises])
+                tous_les_evenements.sort()
+
+                # ===== MODE ÉVÈNEMENT =====
+                if periode == 'Evenement':
+                    for pos in positions_lst:
+                        for te in type_events_list:
+                            idx_events = idx_ruptures if te == 'rupture' else idx_reprises
+                            if evenement_filtre != 'Tous':
+                                if evenement_filtre < len(idx_events):
+                                    idx_events = [idx_events[evenement_filtre]]
+                                else:
+                                    idx_events = []
+
+                            for r in roles_list:
+                                col_acc = f'acceleration_{r}_{pos}'
+                                col_v = f'vitesse_signee_{r}_{pos}'
+                                col_proj = f'projection_ortho_{r}_{pos}'
+                                col_dif = f'dif_proj_{r}'
+                                col_x = f'{r}-{pos[0]}X'
+                                col_y = f'{r}-{pos[0]}Y'
+                                cols_requises = (col_acc, col_v, col_proj, col_dif, col_x, col_y)
+                                if any(c not in df.columns for c in cols_requises):
+                                    continue
+
+                                for idx in idx_events:
+                                    if idx - n_avant < 20:
+                                        continue
+                                    idx_debut = max(0, idx - n_avant)
+                                    idx_fin = min(len(df), idx + n_apres)
+                                    fenetre = df.iloc[idx_debut:idx_fin]
+                                    if len(fenetre) < n_avant + 10:
+                                        continue
+
+                                    # Deux prochains évènements
+                                    prochains_idx = sorted(
+                                        [i for i, _ in tous_les_evenements if i > idx])[:2]
+                                    deux_prochains = [(i - idx) * 10 for i in prochains_idx]
+                                    while len(deux_prochains) < 2:
+                                        deux_prochains.append(None)
+
+                                    # Groupe
+                                    groupes = []
+                                    if not taches_tuple[1]: groupes.append(tache)
+                                    if not conditions_tuple[1]: groupes.append(cond)
+                                    if not positions_tuple[1]: groupes.append(pos)
+                                    if not type_events_tuple[1]: groupes.append(te)
+                                    if not roles_tuple[1]: groupes.append(r)
+                                    cle = '_'.join(groupes) if groupes else ''
+
+                                    if cle not in bruts:
+                                        bruts[cle] = {'temps': [], 'acc': [], 'v': [],
+                                                      'proj': [], 'dif': [], 'x': [], 'y': [],
+                                                      'deux_prochains': []}
+                                    n_f = len(fenetre)
+                                    t_rel = (np.arange(n_f) - (idx - idx_debut)) * 10
+                                    bruts[cle]['temps'].append(t_rel)
+                                    bruts[cle]['acc'].append(fenetre[col_acc].values)
+                                    bruts[cle]['v'].append(fenetre[col_v].values)
+                                    bruts[cle]['proj'].append(fenetre[col_proj].values)
+                                    bruts[cle]['dif'].append(fenetre[col_dif].values)
+                                    bruts[cle]['x'].append(fenetre[col_x].values)
+                                    bruts[cle]['y'].append(fenetre[col_y].values)
+                                    bruts[cle]['deux_prochains'].append(deux_prochains)
+
+                # ===== MODE ESSAI =====
+                else:
+                    # Convertir en positions
+                    idx_rup = np.asarray(df.index.get_indexer(
+                        np.asarray(idx_ruptures, dtype=df.index.dtype)), dtype=int)
+                    idx_rep = np.asarray(df.index.get_indexer(
+                        np.asarray(idx_reprises, dtype=df.index.dtype)), dtype=int)
+                    idx_rup = idx_rup[idx_rup >= 0]
+                    idx_rep = idx_rep[idx_rep >= 0]
+                    temps = df['temps_relatif_ms'].to_numpy()
+
+                    for pos in positions_lst:
+                        for r in roles_list:
+                            col_acc = f'acceleration_{r}_{pos}'
+                            col_v = f'vitesse_signee_{r}_{pos}'
+                            col_proj = f'projection_ortho_{r}_{pos}'
+                            col_dif = f'dif_proj_{r}'
+                            col_x = f'{r}-{pos[0]}X'
+                            col_y = f'{r}-{pos[0]}Y'
+                            if col_v not in df.columns:
+                                continue
+
+                            groupes = []
+                            if not taches_tuple[1]: groupes.append(tache)
+                            if not conditions_tuple[1]: groupes.append(cond)
+                            if not positions_tuple[1]: groupes.append(pos)
+                            if not roles_tuple[1]: groupes.append(r)
+                            cle = '_'.join(groupes) if groupes else ''
+
+                            if cle not in bruts:
+                                bruts[cle] = {'temps': [], 'acc': [], 'v': [],
+                                              'proj': [], 'dif': [], 'x': [], 'y': [],
+                                              'ruptures': [], 'reprises': []}
+                            bruts[cle]['temps'].append(temps)
+                            bruts[cle]['acc'].append(df[col_acc].to_numpy() if col_acc in df.columns else np.full(len(df), np.nan))
+                            bruts[cle]['v'].append(df[col_v].to_numpy())
+                            bruts[cle]['proj'].append(df[col_proj].to_numpy() if col_proj in df.columns else np.full(len(df), np.nan))
+                            bruts[cle]['dif'].append(df[col_dif].to_numpy() if col_dif in df.columns else np.full(len(df), np.nan))
+                            bruts[cle]['x'].append(df[col_x].to_numpy() if col_x in df.columns else np.full(len(df), np.nan))
+                            bruts[cle]['y'].append(df[col_y].to_numpy() if col_y in df.columns else np.full(len(df), np.nan))
+                            bruts[cle]['ruptures'].append(temps[idx_rup])
+                            bruts[cle]['reprises'].append(temps[idx_rep])
+
+    # ========== 2) CALCUL DES MOYENNES ET SEM ==========
+    def _moy_sem(liste_tableaux):
+        if not liste_tableaux:
+            return None, None
+        n_max = max(len(a) for a in liste_tableaux)
+        mat = np.full((len(liste_tableaux), n_max), np.nan)
+        for i, a in enumerate(liste_tableaux):
+            mat[i, :len(a)] = a
+        moy = np.nanmean(mat, axis=0)
+        std = np.nanstd(mat, axis=0)
+        n_obs = np.sum(~np.isnan(mat), axis=0)
+        sem = std / np.sqrt(np.where(n_obs > 0, n_obs, 1))
+        return moy, sem
+
+    moyennes = {}
+    for cle, d in bruts.items():
+        temps_moy, _ = _moy_sem(d['temps'])
+        acc_moy, acc_sem = _moy_sem(d['acc'])
+        v_moy, v_sem = _moy_sem(d['v'])
+        proj_moy, proj_sem = _moy_sem(d['proj'])
+        dif_moy, dif_sem = _moy_sem(d['dif'])
+        x_moy, x_sem = _moy_sem(d['x'])
+        y_moy, y_sem = _moy_sem(d['y'])
+
+        moyennes[cle] = {
+            'temps': temps_moy,
+            'acc_moy': acc_moy, 'acc_sem': acc_sem,
+            'v_moy': v_moy, 'v_sem': v_sem,
+            'proj_moy': proj_moy, 'proj_sem': proj_sem,
+            'dif_moy': dif_moy, 'dif_sem': dif_sem,
+            'x_moy': x_moy, 'x_sem': x_sem,
+            'y_moy': y_moy, 'y_sem': y_sem,
+            'n': len(d['acc']),
+            'deux_prochains': d.get('deux_prochains', []),
+            'ruptures': d.get('ruptures', []),
+            'reprises': d.get('reprises', []),
+        }
+
+    # Libérer explicitement la mémoire des bruts avant de quitter
+    del bruts
+    import gc; gc.collect()
+
+    return moyennes
 
 # LISTE DES ESSAIS
 @st.cache_data(max_entries=2, ttl=3600)
