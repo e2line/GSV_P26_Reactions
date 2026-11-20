@@ -524,10 +524,10 @@ taches_effectives = [t for t in taches_list if conditions_par_tache[t]]
 donnees_preparees = calculer_moyennes(
     sorted(taches_list),
     conditions_par_tache,
-    tuple(positions_list),
+    positions_tuple,
     projections,
-    tuple(type_events_list),
-    tuple(roles_list),
+    type_events_tuple,
+    roles_tuple,
     periode,
     essai_filtre,
     evenement_filtre,
