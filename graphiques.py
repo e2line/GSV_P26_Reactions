@@ -248,12 +248,12 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_lst, projectio
     return moyennes
 
 # LISTE DES ESSAIS
-@st.cache_data(max_entries=2, ttl=3600)
-def lister_essais(taches_lst: list[str], cond_lst: list[str]):
+def lister_essais(conditions_par_tache: dict):
+    """Essais des couples (tâche, condition) demandés : {tâche: [conditions]}."""
     essais = []
-    for tache in taches_lst:
-        for cond in cond_lst:
-            for fichier in Path(f"{CACHE_DIR}/{tache}/{cond}").glob("*.parquet"):
+    for tache, conds in conditions_par_tache.items():
+        for cond in conds:
+            for fichier in Path(f"cache/{tache}/{cond}").glob("*.parquet"):
                 essais.append({
                     'tache': tache,
                     'condition': cond,
