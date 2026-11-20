@@ -526,8 +526,8 @@ donnees_preparees = calculer_moyennes(
     conditions_par_tache,
     tuple(positions_list),
     projections,
-    tuple(type_events_list)
-    tuple(roles_list)
+    tuple(type_events_list),
+    tuple(roles_list),
     periode,
     essai_filtre,
     evenement_filtre,
