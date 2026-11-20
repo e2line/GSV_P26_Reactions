@@ -780,179 +780,60 @@ def lisser(y, largeur=4):
 if not donnees:
     st.warning("Aucune donnée")
 else:
-    n_avant = int(fenetre_avant / 10)
-
     cles_triees = sorted(donnees.keys())
     
+    # Palette (inchangé)
     if len(cles_triees) <= 10:
         palette = [plt.cm.tab10(i) for i in range(len(cles_triees))]
     elif len(cles_triees) <= 20:
         palette = [plt.cm.tab20(i) for i in range(len(cles_triees))]
     else:
         palette = [plt.cm.turbo(x) for x in np.linspace(0, 1, len(cles_triees))]
-    
     couleurs = {cle: palette[i] for i, cle in enumerate(cles_triees)}
-
-    # --- Figure ---
-    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(14, 18), sharex=True)
     
-    # --- Boucle sur les groupes ---
+    fig, (ax1, ax2, ax3, ax4, ax5, ax6) = plt.subplots(6, 1, figsize=(14, 26), sharex=True)
+    
     for cle in cles_triees:
-        data = donnees[cle]
-        fenetres_acc = data['acc']
-        fenetres_v = data['v']
-        
-        if not fenetres_acc:
-            continue
-        
-        # --- Matrices ---
-        n_max = max(len(f) for f in fenetres_acc)
-        acc_mat = np.full((len(fenetres_acc), n_max), np.nan)
-        v_mat = np.full((len(fenetres_v), n_max), np.nan)
-        
-        for i, (a, v) in enumerate(zip(fenetres_acc, fenetres_v)):
-            acc_mat[i, :len(a)] = a
-            v_mat[i, :len(v)] = v
-        
-        # --- Moyennes ---
-        acc_moy = np.nanmean(acc_mat, axis=0)
-        v_moy = np.nanmean(v_mat, axis=0)
-        
-        # --- SEM ---
-        acc_std = np.nanstd(acc_mat, axis=0)
-        v_std = np.nanstd(v_mat, axis=0)
-        n_obs = np.sum(~np.isnan(acc_mat), axis=0)
-        n_obs_safe = np.where(n_obs > 0, n_obs, 1)
-        acc_sem = acc_std / np.sqrt(n_obs_safe)
-        v_sem = v_std / np.sqrt(n_obs_safe)
-
-        # --- Matrices pour x et y ---
-        fenetres_x = data['x']
-        fenetres_y = data['y']
-
-        n_max_x = max(len(f) for f in fenetres_x) if fenetres_x else n_max
-        n_max_y = max(len(f) for f in fenetres_y) if fenetres_y else n_max
-
-        x_mat = np.full((len(fenetres_x), n_max_x), np.nan)
-        y_mat = np.full((len(fenetres_y), n_max_y), np.nan)
-
-        for i, (xx, yy) in enumerate(zip(fenetres_x, fenetres_y)):
-            x_mat[i, :len(xx)] = xx
-            y_mat[i, :len(yy)] = yy
-
-        x_moy = np.nanmean(x_mat, axis=0)
-        y_moy = np.nanmean(y_mat, axis=0)
-
-        x_std = np.nanstd(x_mat, axis=0)
-        y_std = np.nanstd(y_mat, axis=0)
-        n_obs_x = np.sum(~np.isnan(x_mat), axis=0)
-        n_obs_y = np.sum(~np.isnan(y_mat), axis=0)
-        x_sem = x_std / np.sqrt(np.where(n_obs_x > 0, n_obs_x, 1))
-        y_sem = y_std / np.sqrt(np.where(n_obs_y > 0, n_obs_y, 1))
-
-        if lisse:
-            acc_moy = lisser(acc_moy)
-            v_moy = lisser(v_moy)
-            acc_sem = lisser(acc_sem)
-            v_sem = lisser(v_sem)
-            x_moy = lisser(x_moy)
-            y_moy = lisser(y_moy)
-            x_sem = lisser(x_sem)
-            y_sem = lisser(y_sem)
-
-        # Temps pour x et y (peut différer de celui d'acc/v si tailles différentes)
-        temps_x = np.arange(n_max_x) * 10 - fenetre_avant
-        temps_y = np.arange(n_max_y) * 10 - fenetre_avant
-
-        temps = np.arange(n_max) * 10 - fenetre_avant
-        
-        # --- Couleur et label ---
+        d = donnees[cle]
         couleur = couleurs[cle]
         label = traduire(cle)
+        n = d['n']
         
-        # --- Tracé des courbes ---
-        if mode_affichage == 'Courbe':
-            if label.find('Souris-Souris') >= 0:
-                ax1.plot(temps, acc_moy, color=couleur, linewidth=2, linestyle='--', label=f'{label} (n={len(fenetres_acc)})')
-                ax2.plot(temps, v_moy, color=couleur, linewidth=2, linestyle='--', label=f'{label} (n={len(fenetres_v)})')
-                ax3.plot(temps_x, x_moy, color=couleur, linewidth=2, linestyle='--', label=f'{label} (n={len(fenetres_x)})')
-                ax4.plot(temps_y, y_moy, color=couleur, linewidth=2, linestyle='--', label=f'{label} (n={len(fenetres_y)})')
-
-            else :
-                ax1.plot(temps, acc_moy, color=couleur, linewidth=2, label=f'{label} (n={len(fenetres_acc)})')
-                ax2.plot(temps, v_moy, color=couleur, linewidth=2, label=f'{label} (n={len(fenetres_v)})')
-                ax3.plot(temps_x, x_moy, color=couleur, linewidth=2, label=f'{label} (n={len(fenetres_x)})')
-                ax4.plot(temps_y, y_moy, color=couleur, linewidth=2, label=f'{label} (n={len(fenetres_y)})')
-
-            ax1.fill_between(temps, acc_moy - acc_sem, acc_moy + acc_sem, color=couleur, alpha=0.15)
-            ax2.fill_between(temps, v_moy - v_sem, v_moy + v_sem, color=couleur, alpha=0.15)
-            ax3.fill_between(temps_x, x_moy - x_sem, x_moy + x_sem, color=couleur, alpha=0.15)
-            ax4.fill_between(temps_y, y_moy - y_sem, y_moy + y_sem, color=couleur, alpha=0.15) 
-
-        else:
-            pas = max(1, echantillon // 10)
-            points_temps = []
-            points_acc = []
-            points_v = []
-            points_x = []
-            points_y = []
-            
-            for a, v in zip(fenetres_acc, fenetres_v):
-                n = len(a)
-                t_fenetre = (np.arange(n) - n_avant) * 10
-                idx_sous = np.arange(0, n, pas)
-                points_temps.extend(t_fenetre[idx_sous])
-                points_acc.extend(a[idx_sous])
-                points_v.extend(v[idx_sous])
-            for xx, yy in zip(fenetres_x, fenetres_y):
-                n = len(xx)
-                idx_sous = np.arange(0, n, pas)
-                points_x.extend(xx[idx_sous])
-                points_y.extend(yy[idx_sous])
-
-            if not extremes:
-                points_temps = np.array(points_temps)
-                points_acc = np.array(points_acc)
-                points_v = np.array(points_v)
-                
-                p1_acc, p99_acc = np.nanpercentile(points_acc, [1, 99])
-                p1_v, p99_v = np.nanpercentile(points_v, [1, 99])
-                
-                masque = (
-                    (points_acc >= p1_acc) & (points_acc <= p99_acc) &
-                    (points_v >= p1_v) & (points_v <= p99_v)
-                )
-                
-                points_temps = points_temps[masque]
-                points_acc = points_acc[masque]
-                points_v = points_v[masque]
-            
-            ax1.scatter(points_temps, points_acc, color=couleur, alpha=0.3, s=5, label=f'{label} (n={len(fenetres_acc)})')
-            ax2.scatter(points_temps, points_v, color=couleur, alpha=0.3, s=5, label=f'{label} (n={len(fenetres_v)})')
-            ax3.scatter(points_temps[:len(points_x)], points_x, color=couleur, alpha=0.3, s=5, label=f'{label} (n={len(fenetres_x)})')
-            ax4.scatter(points_temps[:len(points_y)], points_y, color=couleur, alpha=0.3, s=5, label=f'{label} (n={len(fenetres_y)})')
+        # Récupérer les séries (déjà moyennées)
+        temps = d['temps']
+        if lisse:
+            for k in ['acc_moy', 'v_moy', 'proj_moy', 'dif_moy', 'x_moy', 'y_moy',
+                      'acc_sem', 'v_sem', 'proj_sem', 'dif_sem', 'x_sem', 'y_sem']:
+                d[k] = lisser(d[k])
         
-        # --- BARRES VERTICALES DES PROCHAINS ÉVÉNEMENTS ---
-        if prochains:
-            deux_prochains = data['deux_prochains']
-            temps_1 = [t[0] for t in deux_prochains if t[0] is not None]
-            temps_2 = [t[1] for t in deux_prochains if t[1] is not None]
+        ls = '--' if 'Souris-Souris' in label else '-'
         
-            if temps_1:
-                moy_1 = np.mean(temps_1)
-                ax1.axvline(moy_1, color=couleur, linestyle='--',
-                            alpha=0.6, linewidth=1.5,
-                            label=f'Prochain évènement contraire')
-                ax2.axvline(moy_1, color=couleur, linestyle='--',
-                            alpha=0.6, linewidth=1.5)
-            
-            if temps_2:
-                moy_2 = np.mean(temps_2)
-                ax1.axvline(moy_2, color=couleur, linestyle=':',
-                            alpha=0.6, linewidth=1.5,
-                            label=f'Prochain même évènement')
-                ax2.axvline(moy_2, color=couleur, linestyle=':',
-                            alpha=0.6, linewidth=1.5)
+        ax1.plot(temps, d['acc_moy'], color=couleur, linewidth=2, linestyle=ls, label=f'{label} (n={n})')
+        ax2.plot(temps, d['v_moy'], color=couleur, linewidth=2, linestyle=ls)
+        ax3.plot(temps, d['proj_moy'], color=couleur, linewidth=2, linestyle=ls)
+        ax4.plot(temps, d['dif_moy'], color=couleur, linewidth=2, linestyle=ls)
+        ax5.plot(temps, d['x_moy'], color=couleur, linewidth=2, linestyle=ls)
+        ax6.plot(temps, d['y_moy'], color=couleur, linewidth=2, linestyle=ls)
+        
+        ax1.fill_between(temps, d['acc_moy']-d['acc_sem'], d['acc_moy']+d['acc_sem'], color=couleur, alpha=0.15)
+        ax2.fill_between(temps, d['v_moy']-d['v_sem'], d['v_moy']+d['v_sem'], color=couleur, alpha=0.15)
+        ax3.fill_between(temps, d['proj_moy']-d['proj_sem'], d['proj_moy']+d['proj_sem'], color=couleur, alpha=0.15)
+        ax4.fill_between(temps, d['dif_moy']-d['dif_sem'], d['dif_moy']+d['dif_sem'], color=couleur, alpha=0.15)
+        ax5.fill_between(temps, d['x_moy']-d['x_sem'], d['x_moy']+d['x_sem'], color=couleur, alpha=0.15)
+        ax6.fill_between(temps, d['y_moy']-d['y_sem'], d['y_moy']+d['y_sem'], color=couleur, alpha=0.15)
+        
+        # Prochains évènements (mode Évènement)
+        if periode == 'Evenement' and d.get('deux_prochains'):
+            t1 = [t[0] for t in d['deux_prochains'] if t[0] is not None]
+            t2 = [t[1] for t in d['deux_prochains'] if t[1] is not None]
+            if t1:
+                m1 = np.mean(t1)
+                ax1.axvline(m1, color=couleur, linestyle='--', alpha=0.6, linewidth=1.5)
+                ax2.axvline(m1, color=couleur, linestyle='--', alpha=0.6, linewidth=1.5)
+            if t2:
+                m2 = np.mean(t2)
+                ax1.axvline(m2, color=couleur, linestyle=':', alpha=0.6, linewidth=1.5)
+                ax2.axvline(m2, color=couleur, linestyle=':', alpha=0.6, linewidth=1.5)
 
     # --- Lignes de référence ---
     if periode == 'Evenement':
