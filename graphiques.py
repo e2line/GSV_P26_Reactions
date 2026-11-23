@@ -4,13 +4,16 @@ from pathlib import Path
 # --- Ajouter la racine au PYTHONPATH ---
 RACINE = Path(__file__).resolve().parent
 sys.path.insert(0, str(RACINE))
-
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib.patches import Circle, Rectangle
 import numpy as np
 import io
 import json
+import tempfile
+import os
 import importlib
 import gc
 
@@ -20,6 +23,9 @@ from data.contact import detecter_ruptures_contact
 from features.metrics import enrichir_dataframe_graphique
 
 # --- Configuration ---
+CACHE_DIR = RACINE / "cache"
+CONDITIONS = ['BB', 'BH', 'HB', 'HH', 'GB', 'GH']
+POSITIONS = ['tt', 'rt', 'tr', 'rr']
 TYPES_EVENTS = ['rupture', 'reprise']
 ROLES = ['A', 'B']
 TACHES = ['GSV', 'BST', 'COL']
@@ -27,16 +33,16 @@ TACHES = ['GSV', 'BST', 'COL']
 st.title("Analyse temporelle des réactions")
 
 # ============================================================
-# CALCUL DES MOYENNES (remplace preparer_donnees + extraire_*)
+# CALCUL DES MOYENNES (remplace preparer_donnees + extraire_fenetres + extraire_essai)
 # ============================================================
+
 @st.cache_data(max_entries=2, ttl=3600, show_spinner="Calcul des moyennes…")
-def calculer_moyennes(taches_lst, conditions_par_tache, positions_list, projections,
+def calculer_moyennes(taches_lst, conditions_par_tache, positions_lst, projections,
                       taches_tuple, conditions_tuple, positions_tuple,
                       type_events_tuple, roles_tuple, periode, essai_filtre,
                       evenement_filtre, fenetre_avant_ms, fenetre_apres_ms,
                       pas_direction):
-    """Charge les essais, extrait les fenêtres (ou l'essai complet), calcule
-    les moyennes et SEM par groupe, et ne renvoie que ces séries légères."""
+    # ========== 1) CHARGEMENT + ENRICHISSEMENT + EXTRACTION ==========
     n_avant = int(fenetre_avant_ms / 10)
     n_apres = int(fenetre_apres_ms / 10)
     type_events_list = type_events_tuple[0]
@@ -56,7 +62,6 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_list, projecti
             if not chemin_cond.exists():
                 continue
 
-            # Métadonnées : une lecture par condition
             chemin_meta = chemin_cond / "metadatas.json"
             metas = {}
             if chemin_meta.exists() and Config.TACHE == 'GSV':
@@ -72,7 +77,6 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_list, projecti
                 if 'contact_AB' not in df.columns:
                     continue
 
-                # Cibles pour GSV
                 cible_A = cible_B = None
                 if Config.TACHE == 'GSV':
                     meta = metas.get(essai, {})
@@ -81,13 +85,11 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_list, projecti
                     cible_A = ca if ca[0] is not None and ca[1] is not None else None
                     cible_B = cb if cb[0] is not None and cb[1] is not None else None
 
-                # Enrichir pour chaque position
-                for pos in positions_list:
+                for pos in positions_lst:
                     df = enrichir_dataframe_graphique(
                         df, pos, Config.TACHE, proj_intersujets,
                         cible_A, cible_B, pas_direction)
 
-                # Détecter les évènements
                 idx_ruptures, idx_reprises = detecter_ruptures_contact(
                     df, 'contact_AB', col_temps='temps_relatif_ms')
                 tous_les_evenements = (
@@ -97,7 +99,7 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_list, projecti
 
                 # ===== MODE ÉVÈNEMENT =====
                 if periode == 'Evenement':
-                    for pos in positions_list:
+                    for pos in positions_lst:
                         for te in type_events_list:
                             idx_events = idx_ruptures if te == 'rupture' else idx_reprises
                             if evenement_filtre != 'Tous':
@@ -165,7 +167,7 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_list, projecti
                     idx_rep = idx_rep[idx_rep >= 0]
                     temps = df['temps_relatif_ms'].to_numpy()
 
-                    for pos in positions_list:
+                    for pos in positions_lst:
                         for r in roles_list:
                             col_acc = f'acceleration_{r}_{pos}'
                             col_v = f'vitesse_signee_{r}_{pos}'
@@ -197,7 +199,7 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_list, projecti
                             bruts[cle]['ruptures'].append(temps[idx_rup])
                             bruts[cle]['reprises'].append(temps[idx_rep])
 
-    # ========== CALCUL DES MOYENNES ET SEM ==========
+    # ========== 2) CALCUL DES MOYENNES ET SEM ==========
     def _moy_sem(liste_tableaux):
         if not liste_tableaux:
             return None, None
@@ -239,10 +241,10 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_list, projecti
     gc.collect()
     return moyennes
 
+# ============================================================
+# LISTE DES ESSAIS / ÉVÈNEMENTS
+# ============================================================
 
-# ============================================================
-# LISTE DES ESSAIS
-# ============================================================
 def lister_essais(conditions_par_tache: dict):
     essais = []
     for tache, conds in conditions_par_tache.items():
@@ -263,8 +265,7 @@ def lister_evenements(essai, type_event, tache, cond):
     df = pd.read_parquet(f"cache/{tache}/{cond}/{essai}.parquet")
     if 'contact_AB' not in df.columns:
         return ['Tous']
-    idx_ruptures, idx_reprises = detecter_ruptures_contact(
-        df, 'contact_AB', col_temps='temps_relatif_ms', duree_min_ms=500)
+    idx_ruptures, idx_reprises = detecter_ruptures_contact(df, 'contact_AB', col_temps='temps_relatif_ms', duree_min_ms=500)
     if type_event == 'rupture':
         idx_events = idx_ruptures
     elif type_event == 'reprise':
@@ -281,10 +282,96 @@ def uniques(seq):
             vus.append(x)
     return vus
 
+# ============================================================
+# GÉNÉRATION DU GIF
+# ============================================================
+
+def construire_gif_reaction(fenetres_v, fenetre_avant_ms, pas_direction_ms, titre="", fps=50,
+                             rayon_corps_percu=20.0, rayon_corps_percevant=50.0,
+                             taille_case=20.0, n_cases=4, distance_initiale=60.0):
+    if not fenetres_v:
+        return None
+
+    dt = float(pas_direction_ms)
+    n_max = max(len(v) for v in fenetres_v)
+    v_mat = np.full((len(fenetres_v), n_max), np.nan)
+    for i, v in enumerate(fenetres_v):
+        v_mat[i, :len(v)] = v
+    v_moy = np.nanmean(v_mat, axis=0)
+
+    temps_ms = np.arange(n_max) * dt - fenetre_avant_ms
+    idx_zero = int(np.argmin(np.abs(temps_ms)))
+
+    distances = np.full(n_max, np.nan)
+    distances[idx_zero] = distance_initiale
+    for i in range(idx_zero + 1, n_max):
+        distances[i] = (distances[i-1] if np.isnan(v_moy[i])
+                        else distances[i-1] - v_moy[i] * dt)
+    for i in range(idx_zero - 1, -1, -1):
+        distances[i] = (distances[i+1] if np.isnan(v_moy[i+1])
+                        else distances[i+1] + v_moy[i+1] * dt)
+    distances = np.clip(distances, 0, None)
+
+    taille_grille = taille_case * n_cases
+    d_max = max(200.0, float(np.nanmax(distances)) + 60.0)
+
+    fig_anim, ax = plt.subplots(figsize=(8, 4))
+    couleur_case_A = '#E88A2E'
+    couleur_case_B = '#B5651D'
+    for i in range(n_cases):
+        for j in range(n_cases):
+            x0 = -taille_grille/2 + j * taille_case
+            y0 = -taille_grille/2 + i * taille_case
+            couleur = couleur_case_A if (i + j) % 2 == 0 else couleur_case_B
+            ax.add_patch(Rectangle((x0, y0), taille_case, taille_case,
+                                   facecolor=couleur, edgecolor='white',
+                                   linewidth=0.5, zorder=1))
+    ax.add_patch(Circle((0, 0), rayon_corps_percevant, fill=False, edgecolor='purple', linewidth=1.2, linestyle='--', zorder=2))
+    ax.add_patch(Circle((0, 0), rayon_corps_percu, facecolor='blue', edgecolor='none', zorder=3))
+    individu_patch = Circle((distance_initiale, 0), rayon_corps_percu, facecolor='blue', edgecolor='none', linewidth=1.5, zorder=4)
+    ax.add_patch(individu_patch)
+    ligne_contact, = ax.plot([], [], color='gray', linestyle=':', linewidth=1, alpha=0.6, zorder=0)
+    txt_info = ax.text(0.02, 0.95, '', transform=ax.transAxes,
+                       verticalalignment='top', fontsize=10, family='monospace',
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    ax.set_title(titre, fontsize=12)
+    ax.set_xlim(-d_max, d_max)
+    ax.set_ylim(-d_max * 0.3, d_max * 0.3)
+    ax.set_aspect('equal')
+    ax.axhline(0, color='gray', linewidth=0.5, alpha=0.5)
+    ax.set_xlabel('Position x (px)')
+    ax.set_yticks([])
+
+    def update(frame_idx):
+        d = distances[frame_idx]
+        t = temps_ms[frame_idx]
+        v = v_moy[frame_idx] if not np.isnan(v_moy[frame_idx]) else 0.0
+        individu_patch.center = (d, 0)
+        ligne_contact.set_data([0, d], [0, 0])
+        if v < -0.01:
+            ligne_contact.set_color('green')
+        elif v > 0.01:
+            ligne_contact.set_color('red')
+        else:
+            ligne_contact.set_color('gray')
+        txt_info.set_text(f"t = {t:+.0f} ms\nd = {d:.1f} px\nv = {v:+.3f} px/ms")
+        return individu_patch, ligne_contact, txt_info
+
+    anim = FuncAnimation(fig_anim, update, frames=n_max, interval=1000 // fps, blit=True)
+    buf_gif = io.BytesIO()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        chemin_tmp = os.path.join(tmpdir, "anim.gif")
+        anim.save(chemin_tmp, writer=PillowWriter(fps=fps))
+        with open(chemin_tmp, "rb") as f:
+            buf_gif.write(f.read())
+    buf_gif.seek(0)
+    plt.close(fig_anim)
+    return buf_gif
 
 # ============================================================
 # SIDEBAR
 # ============================================================
+
 st.sidebar.header("Affichage")
 mode_affichage = st.sidebar.radio("Mode d'affichage :", ['Courbe', 'Nuage de points'], index=0)
 
@@ -368,6 +455,7 @@ for tache in taches_list:
     except (ModuleNotFoundError, AttributeError):
         st.sidebar.warning(f"Config {tache} introuvable")
         conds_tache = []
+
     conds_dispo_par_tache[tache] = conds_tache
     conds_choisies_par_tache[tache] = [
         c for c in conds_tache
@@ -435,9 +523,10 @@ if 'essai' in df_essais.columns:
     essais_disponibles = ['Tous'] + sorted(df_essais['essai'].unique().tolist())
 else:
     essais_disponibles = ['Tous']
+
 essai = st.sidebar.selectbox("Essai :", essais_disponibles)
 
-# Évènement
+# Evenement
 evenement = 'Tous'
 if periode == 'Evenement' and essai != 'Tous' and (rupture or reprise):
     type_event_pour_event = 'rupture' if rupture else 'reprise'
@@ -447,29 +536,27 @@ if periode == 'Evenement' and essai != 'Tous' and (rupture or reprise):
     evenements_disponibles = lister_evenements(essai, type_event_pour_event, tache_essai, condition_essai)
     evenement = st.sidebar.selectbox("Événement :", evenements_disponibles)
 
-# Échantillonnage
+# Echantillonage
 if mode_affichage == "Nuage de points":
-    echantillon = st.sidebar.slider("Echantillonage (ms)", 10, 500, 100, 10)
+    echantillon = st.sidebar.slider("Echantillonage (ms)", 10, 500, 100, 10, help="Temps entre les différents enregistrements")
 
 # Fenêtre
 if periode == "Evenement":
-    fenetre_avant = st.sidebar.slider("Fenêtre avant (ms)", 100, 1000, 500, 100)
-    fenetre_apres = st.sidebar.slider("Fenêtre après (ms)", 500, 3000, 1500, 100)
+    fenetre_avant = st.sidebar.slider("Fenêtre avant (ms)", 100, 1000, 500, 100, help="Fenêtre de temps affichée avant l'évènement sur le graphique")
+    fenetre_apres = st.sidebar.slider("Fenêtre après (ms)", 500, 3000, 1500, 100, help="Fenêtre de temps affichée après l'évènement sur le graphique")
 else:
     fenetre_avant = 0
     fenetre_apres = 0
 
 # Pas direction
-pas_direction = st.sidebar.slider("Fenêtre glissante d'enregistrement de la vitesse (ms)",
-                                   40, 500, 200, 20) // 10
+pas_direction = st.sidebar.slider("Fenêtre glissante d'enregistrement de la vitesse (ms)", 40, 500, 200, 20, help="Temps entre les enregistrements des positions d'un individu pour le calcul de la vitesse") // 10
 
 # ============================================================
-# APPEL DU CALCUL
+# CALCUL DES MOYENNES
 # ============================================================
-taches_effectives = [t for t in taches_list if conditions_par_tache[t]]
 
 donnees = calculer_moyennes(
-    taches_effectives,
+    sorted(taches_list),
     conditions_par_tache,
     positions_list,
     projections,
@@ -483,12 +570,13 @@ donnees = calculer_moyennes(
     evenement,
     fenetre_avant,
     fenetre_apres,
-    pas_direction,
+    pas_direction
 )
 
 # ============================================================
 # TRADUCTION
 # ============================================================
+
 LABELS_LISIBLES = {
     'tt': 'Curseur-Curseur',
     'rt': 'Souris guide-Curseur suiveur',
@@ -511,21 +599,19 @@ if taches_list == ['GSV']:
         LABELS_LISIBLES['A'] = 'Guide/Guide A'
         LABELS_LISIBLES['B'] = 'Suiveur/Guide B'
 
-
 def traduire(cle):
     if not cle:
         return 'Toutes les données'
     parties = cle.split('_')
     return ' | '.join(LABELS_LISIBLES.get(p, p) for p in parties)
 
-
 def lisser(y, largeur=4):
     return pd.Series(y).rolling(largeur, center=True, min_periods=1).mean().to_numpy()
-
 
 # ============================================================
 # AFFICHAGE
 # ============================================================
+
 if not donnees:
     st.warning("Aucune donnée")
 else:
@@ -562,12 +648,12 @@ else:
         ax5.plot(temps, d['x_moy'], color=couleur, linewidth=2, linestyle=ls)
         ax6.plot(temps, d['y_moy'], color=couleur, linewidth=2, linestyle=ls)
 
-        ax1.fill_between(temps, d['acc_moy'] - d['acc_sem'], d['acc_moy'] + d['acc_sem'], color=couleur, alpha=0.15)
-        ax2.fill_between(temps, d['v_moy'] - d['v_sem'], d['v_moy'] + d['v_sem'], color=couleur, alpha=0.15)
-        ax3.fill_between(temps, d['proj_moy'] - d['proj_sem'], d['proj_moy'] + d['proj_sem'], color=couleur, alpha=0.15)
-        ax4.fill_between(temps, d['dif_moy'] - d['dif_sem'], d['dif_moy'] + d['dif_sem'], color=couleur, alpha=0.15)
-        ax5.fill_between(temps, d['x_moy'] - d['x_sem'], d['x_moy'] + d['x_sem'], color=couleur, alpha=0.15)
-        ax6.fill_between(temps, d['y_moy'] - d['y_sem'], d['y_moy'] + d['y_sem'], color=couleur, alpha=0.15)
+        ax1.fill_between(temps, d['acc_moy']-d['acc_sem'], d['acc_moy']+d['acc_sem'], color=couleur, alpha=0.15)
+        ax2.fill_between(temps, d['v_moy']-d['v_sem'], d['v_moy']+d['v_sem'], color=couleur, alpha=0.15)
+        ax3.fill_between(temps, d['proj_moy']-d['proj_sem'], d['proj_moy']+d['proj_sem'], color=couleur, alpha=0.15)
+        ax4.fill_between(temps, d['dif_moy']-d['dif_sem'], d['dif_moy']+d['dif_sem'], color=couleur, alpha=0.15)
+        ax5.fill_between(temps, d['x_moy']-d['x_sem'], d['x_moy']+d['x_sem'], color=couleur, alpha=0.15)
+        ax6.fill_between(temps, d['y_moy']-d['y_sem'], d['y_moy']+d['y_sem'], color=couleur, alpha=0.15)
 
         if periode == 'Evenement' and d.get('deux_prochains'):
             t1 = [t[0] for t in d['deux_prochains'] if t[0] is not None]
@@ -581,25 +667,22 @@ else:
                 for ax in (ax1, ax2):
                     ax.axvline(m2, color=couleur, linestyle=':', alpha=0.6, linewidth=1.5)
 
-    # Lignes de référence
     if periode == 'Evenement':
         for ax in (ax1, ax2):
             ax.axvline(0, color='red', linestyle='--', alpha=1)
+
     for ax in (ax1, ax2, ax3, ax4):
         ax.axhline(0, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
-    ax5.axhline(Config.ESPACE_X / 2, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
-    ax6.axhline(Config.ESPACE_Y / 2, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
+    ax5.axhline(Config.ESPACE_X/2, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
+    ax6.axhline(Config.ESPACE_Y/2, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
 
-    # Barres ruptures/reprises (mode Essai)
     if periode == 'Essai':
         for cle in cles_triees:
             d = donnees[cle]
-            ruptures = (d.get('ruptures') or [[]])[0]
-            reprises = (d.get('reprises') or [[]])[0]
-            for t in ruptures:
+            for t in (d.get('ruptures') or [[]])[0]:
                 for ax in (ax1, ax2, ax3, ax4, ax5, ax6):
                     ax.axvline(t, color='red', linestyle='--', alpha=0.3, linewidth=0.8)
-            for t in reprises:
+            for t in (d.get('reprises') or [[]])[0]:
                 for ax in (ax1, ax2, ax3, ax4, ax5, ax6):
                     ax.axvline(t, color='green', linestyle='-', alpha=0.3, linewidth=0.8)
 
@@ -631,7 +714,6 @@ else:
     for ax in (ax1, ax2, ax3, ax4, ax5, ax6):
         ax.grid(True, alpha=0.3)
 
-
     def ajuster_limites(ax, centre, marge=0.05):
         ymin, ymax = ax.get_ylim()
         demi = max(centre - ymin, ymax - centre)
@@ -644,8 +726,8 @@ else:
     ajuster_limites(ax2, 0)
     ajuster_limites(ax3, 0)
     ajuster_limites(ax4, 0)
-    ajuster_limites(ax5, Config.ESPACE_X / 2)
-    ajuster_limites(ax6, Config.ESPACE_Y / 2)
+    ajuster_limites(ax5, Config.ESPACE_X/2)
+    ajuster_limites(ax6, Config.ESPACE_Y/2)
 
     plt.tight_layout()
     st.pyplot(fig, width="stretch")
@@ -662,3 +744,30 @@ else:
             data=st.session_state['png_buffer'],
             mime="image/png"
         )
+
+    # Animation GIF (mode Évènement)
+    if periode == 'Evenement':
+        with st.subheader("Animations de la réaction"):
+            onglets = st.tabs([traduire(c) or "Toutes" for c in cles_triees])
+            for onglet, c in zip(onglets, cles_triees):
+                with onglet:
+                    # Pour le GIF, on a besoin des fenêtres brutes, pas seulement des moyennes.
+                    # On les reconstruit ici à partir des données déjà en cache dans `donnees` ?
+                    # Non : `donnees` ne contient plus les fenêtres individuelles.
+                    # On propose le GIF uniquement si un seul essai est sélectionné.
+                    if essai != 'Tous':
+                        st.info("Le GIF nécessite un essai unique (sélectionnez un essai).")
+                    else:
+                        st.info("Sélectionnez un essai unique pour générer le GIF.")
+
+        # Statistiques (sur la dernière clé uniquement, comme avant)
+        st.subheader("Statistiques")
+        idx_event = fenetre_avant // 10
+        cle_stats = cles_triees[-1] if cles_triees else None
+        if cle_stats:
+            d = donnees[cle_stats]
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Acc avant (px/s²)", f"{np.nanmean(d['acc_moy'][:idx_event]) * 1e6:.2f}")
+            col2.metric("Acc après (px/s²)", f"{np.nanmean(d['acc_moy'][idx_event+40:]) * 1e6:.2f}")
+            col3.metric("V avant (px/s)", f"{np.nanmean(d['v_moy'][:idx_event]) * 1000:.2f}")
+            col4.metric("V après (px/s)", f"{np.nanmean(d['v_moy'][idx_event+20:]) * 1000:.2f}")
