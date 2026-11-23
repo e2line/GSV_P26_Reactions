@@ -181,8 +181,8 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_lst, projectio
 
                     for pos in positions_lst:
                         for r in roles_list:
-                            col_acc = f'acc_A_vers_B_{pos}' if r == 'A' else f'acc_B_vers_A_{pos}'
-                            col_v = f'vitesse_A_vers_B_{pos}' if r == 'A' else f'vitesse_B_vers_A_{pos}'
+                            col_acc = f'acceleration_A_{pos}' if r == 'A' else f'acceleration_B_{pos}'
+                            col_v = f'vitesse_signee_A_{pos}' if r == 'A' else f'vitesse_signee_B_{pos}'
                             col_x = f'{r}-{pos[0]}X'
                             col_y = f'{r}-{pos[0]}Y'
                             col_proj = f'projection_ortho_{r}_{pos}'
