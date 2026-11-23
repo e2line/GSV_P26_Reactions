@@ -122,7 +122,7 @@ def interpoler_paliers(df, cols_xy, col_t='temps_relatif_ms'):
     return df
 
 
-def enrichir_dataframe(df, pos='tt', pas_direction=20):
+def enrichir_dataframe(df, pos='tt', intersujets=True, tache='GSV', cible_A=None, cible_B=None, pas_direction=20):
     """
     Enrichit un DataFrame avec les nouvelles métriques pour une position.
     """
