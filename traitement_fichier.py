@@ -19,9 +19,10 @@ class Config:
 
 # CALCUL DES MÉTRIQUES
 
-def vitesse_signee(df, col_pos_source, col_nom, role, pas_direction=20, dt_ms=10):
+def vitesse_signee(df, col_pos_src, col_pos_autre, col_vitesse, col_proj, pas_direction=Config.PAS_DIRECTION, dt_ms=Config.DT, pos_t_src=None, pos_t_autre=None):
     """
-    Calcule la vitesse signée d'un sujet vers une cible.
+    Calcule la vitesse signée d'une position vers une autre en px/ms, souvent d'un sujet vers l'autre ou vers la cible.
+    Récupère les position curseur par défaut afin de pouvoir calculer l'axe avec celles-ci pour éviter que le d&callage des positions souris cumulés soit pris en compte
     
     Paramètres
     ----------
@@ -36,49 +37,90 @@ def vitesse_signee(df, col_pos_source, col_nom, role, pas_direction=20, dt_ms=10
     ------
     df avec la nouvelle colonne
     """
-    x_src, y_src = col_pos_source
+    x_src, y_src = col_pos_src
     
     # Delta de position
     dx = df[x_src].shift(-pas_direction//2) - df[x_src].shift(pas_direction//2)
     dy = df[y_src].shift(-pas_direction//2) - df[y_src].shift(pas_direction//2)
     
-    # Direction vers la cible
-    if role == 'A':
-        # Axe : A -> B
-        ux = df['B-tX'] - df['A-tX']
-        uy = df['B-tY'] - df['A-tY']
-    else: 
-        # Axe : B -> A
-        ux = df['A-tX'] - df['B-tX']
-        uy = df['A-tY'] - df['B-tY']
+    ux = df[col_pos_autre[0]] - df[x_src]
+    uy = df[col_pos_autre[1]] - df[y_src]
+    
+    # Direction vers l'autre (curseur-curseur)
+    if isinstance(pos_t_autre[0], str): # Si pos_t_autre est un tuple de noms de colonnes du dataframe
+        ux_t = df[pos_t_autre[0]] - df[pos_t_src[0]]
+        uy_t = df[pos_t_autre[1]] - df[pos_t_src[1]]
+    else : # Si c'est un tuple de position
+        ux_t = pos_t_autre[0] - df[pos_t_src[0]]
+        uy_t = pos_t_autre[1] - df[pos_t_src[1]]
 
     norme_u = np.sqrt(ux**2 + uy**2)
+    norme_u_t = np.sqrt(ux_t**2 + uy_t**2)
     
     # Projection
     proj = (dx * ux + dy * uy) / (norme_u + 1e-9)
+    df[col_proj] = proj
+
+    # Projection sur le vecteur curseur-curseur par défaut
+    proj_t = (dx * ux_t + dy * uy_t) / (norme_u_t + 1e-9)
     
     # Vitesse signée
     dt = pas_direction * dt_ms
-    df[col_nom] = proj / dt
+    df[col_vitesse] = proj_t / dt
 
     # Mettre NaN sur les premières et dernières lignes (pas d'historique)
-    df.loc[:pas_direction//2-1, col_nom] = np.nan
-    df.loc[len(df)-pas_direction//2:, col_nom] = np.nan
+    df.loc[:pas_direction//2-1, col_proj] = np.nan
+    df.loc[len(df)-pas_direction//2:, col_proj] = np.nan
+    df.loc[:pas_direction//2-1, col_vitesse] = np.nan
+    df.loc[len(df)-pas_direction//2:, col_vitesse] = np.nan
     
     return df
 
 
-def acceleration(df, col_vitesse, col_nom, pas_direction=20, dt_ms=10):
+def acceleration(df, col_vitesse, col_acc, pas_direction=Config.PAS_DIRECTION, dt_ms=Config.DT):
     """
-    Calcule l'accélération à partir d'une vitesse signée.
+    Calcule l'accélération, dérivée de la vitesse signée
     """
     dv = df[col_vitesse].shift(-pas_direction//2) - df[col_vitesse].shift(pas_direction//2)
     dt = pas_direction * dt_ms
-    df[col_nom] = dv / dt
+    df[col_acc] = dv / dt
 
     # Mettre NaN sur les premières et dernières lignes (pas d'historique)
-    df.loc[:pas_direction//2-1, col_nom] = np.nan
-    df.loc[len(df)-pas_direction//2:, col_nom] = np.nan
+    df.loc[:pas_direction//2-1, col_acc] = np.nan
+    df.loc[len(df)-pas_direction//2:, col_acc] = np.nan
+    return df
+
+def dif_proj(df, col_dif, sujet, autre, pas_direction=Config.PAS_DIRECTION):
+    if not f'projection_ortho_{sujet}_tt' in df.columns:
+        # Delta de position
+        dx = df[f'{sujet}-tX'].shift(-pas_direction//2) - df[f'{sujet}-tX'].shift(pas_direction//2)
+        dy = df[f'{sujet}-tY'].shift(-pas_direction//2) - df[f'{sujet}-tY'].shift(pas_direction//2)
+            
+        ux = df[f'{autre}-tX'] - df[f'{sujet}-tX']
+        uy = df[f'{autre}-tY'] - df[f'{sujet}-tY']
+        
+        norme_u = np.sqrt(ux**2 + uy**2)
+            
+        # Projection
+        proj = (dx * ux + dy * uy) / (norme_u + 1e-9)
+        df[f'projection_ortho_{sujet}_tt'] = proj
+        
+    if not f'projection_ortho_{sujet}_rr' in df.columns:
+        # Delta de position
+        dx = df[f'{sujet}-rX'].shift(-pas_direction//2) - df[f'{sujet}-rX'].shift(pas_direction//2)
+        dy = df[f'{sujet}-rY'].shift(-pas_direction//2) - df[f'{sujet}-rY'].shift(pas_direction//2)
+            
+        ux = df[f'{autre}-rX'] - df[f'{sujet}-rX']
+        uy = df[f'{autre}-rY'] - df[f'{sujet}-rY']
+        
+        norme_u = np.sqrt(ux**2 + uy**2)
+            
+        # Projection
+        proj = (dx * ux + dy * uy) / (norme_u + 1e-9)
+        df[f'projection_ortho_{sujet}_rr'] = proj
+
+    df[col_dif] = df[f'projection_ortho_{sujet}_tt'] - df[f'projection_ortho_{sujet}_rr']
+
     return df
 
 
@@ -96,38 +138,48 @@ def enrichir_dataframe(df, pos='tt', pas_direction=20):
     Enrichit un DataFrame avec les nouvelles métriques pour une position.
     """
     # Mapping des colonnes selon la position
+    # Mapping des colonnes selon la position
     mapping = {
-        'tt': {
-            'A': ('A-tX', 'A-tY'),
-            'B': ('B-tX', 'B-tY'),
-        },
-        'rt': {
-            'A': ('A-rX', 'A-rY'),
-            'B': ('B-tX', 'B-tY'),
-        },
-        'tr': {
-            'A': ('A-tX', 'A-tY'),
-            'B': ('B-rX', 'B-rY'),
-        },
-        'rr': {
-            'A': ('A-rX', 'A-rY'),
-            'B': ('B-rX', 'B-rY'),
-        },
+    'tt': {'A': Config.COL_AT, 'B': Config.COL_BT},
+    'rt': {'A': Config.COL_AR, 'B': Config.COL_BT},
+    'tr': {'A': Config.COL_AT, 'B': Config.COL_BR},
+    'rr': {'A': Config.COL_AR, 'B': Config.COL_BR},
     }
-    
+
+    # positions du suiveur et du guide en fonction du type de position pos
     pos_A = mapping[pos]['A']
     pos_B = mapping[pos]['B']
 
     df = interpoler_paliers(df, [pos_A, pos_B])
-    
-    # Vitesses signées
-    df = vitesse_signee(df, pos_A, f'vitesse_A_vers_B_{pos}', 'A', pas_direction)
-    df = vitesse_signee(df, pos_B, f'vitesse_B_vers_A_{pos}', 'B', pas_direction)
-    
-    # Accélérations
-    df = acceleration(df, f'vitesse_A_vers_B_{pos}', f'acc_A_vers_B_{pos}', pas_direction)
-    df = acceleration(df, f'vitesse_B_vers_A_{pos}', f'acc_B_vers_A_{pos}', pas_direction)
-    
+
+    if intersujets :
+        # Vitesses signées vers l'autre
+        df = vitesse_signee(df, pos_A, pos_B, f'vitesse_signee_A_{pos}', f'projection_ortho_A_{pos}', pas_direction=pas_direction, pos_t_src=Config.COL_AT, pos_t_autre=Config.COL_BT)
+        df = vitesse_signee(df, pos_B, pos_A, f'vitesse_signee_B_{pos}', f'projection_ortho_B_{pos}', pas_direction=pas_direction, pos_t_src=Config.COL_BT, pos_t_autre=Config.COL_AT)
+
+    else :
+        if tache == 'GSV':
+            # Vitesses signées vers la cible
+            df = vitesse_signee(df, pos_A, pos_B, f'vitesse_signee_A_{pos}', f'projection_ortho_A_{pos}', pas_direction=pas_direction, pos_t_src=Config.COL_AT, pos_t_autre=cible_A)
+            df = vitesse_signee(df, pos_B, pos_A, f'vitesse_signee_B_{pos}', f'projection_ortho_B_{pos}', pas_direction=pas_direction, pos_t_src=Config.COL_BT, pos_t_autre=cible_B)
+
+        elif tache == 'BST':
+            # Vitesses signées vers la bestiole
+            df = vitesse_signee(df, pos_A, pos_B, f'vitesse_signee_A_{pos}', f'projection_ortho_A_{pos}', pas_direction=pas_direction, pos_t_src=Config.COL_AT, pos_t_autre=Config.COL_CT)
+            df = vitesse_signee(df, pos_B, pos_A, f'vitesse_signee_B_{pos}', f'projection_ortho_B_{pos}', pas_direction=pas_direction, pos_t_src=Config.COL_BT, pos_t_autre=Config.COL_CT)
+
+        elif tache == 'COL':
+            # Vitesses signées vers la colline
+            pos_col = (Config.ESPACE_X//2, Config.ESPACE_Y//2)
+            df = vitesse_signee(df, pos_A, pos_B, f'vitesse_signee_A_{pos}', f'projection_ortho_A_{pos}', pas_direction=pas_direction, pos_t_src=Config.COL_AT, pos_t_autre=pos_col)
+            df = vitesse_signee(df, pos_B, pos_A, f'vitesse_signee_B_{pos}', f'projection_ortho_B_{pos}', pas_direction=pas_direction, pos_t_src=Config.COL_BT, pos_t_autre=pos_col)
+
+    df = acceleration(df, f'vitesse_signee_A_{pos}', f'acceleration_A_{pos}', pas_direction)
+    df = acceleration(df, f'vitesse_signee_B_{pos}', f'acceleration_B_{pos}', pas_direction)
+
+    df = dif_proj(df, f'dif_proj_A', 'A', 'B')
+    df = dif_proj(df, f'dif_proj_B', 'B', 'A')
+
     return df
 
 
