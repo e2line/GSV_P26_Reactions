@@ -78,7 +78,7 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_lst, projectio
                     cible_B = cb if cb[0] is not None and cb[1] is not None else None
 
                 for pos in positions_lst:
-                    df = enrichir_dataframe(df, pos, pas_direction)
+                    df = enrichir_dataframe(df, pos, proj_intersujets, Config.TACHE, cible_A, cible_B, pas_direction)
 
                 # --- Calcul des projections orthogonales et différences ---
                 for pos in positions_lst:
