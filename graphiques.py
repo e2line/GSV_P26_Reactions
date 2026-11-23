@@ -78,8 +78,25 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_lst, projectio
                     cible_B = cb if cb[0] is not None and cb[1] is not None else None
 
                 for pos in positions_lst:
-                    # APPEL CORRIGÉ : on utilise enrichir_dataframe
                     df = enrichir_dataframe(df, pos, pas_direction)
+
+                # --- Calcul des projections orthogonales et différences ---
+                for pos in positions_lst:
+                    for r, autre in [('A', 'B'), ('B', 'A')]:
+                        for suffixe_src, suffixe_autre, tag in [
+                            ('t', 't', 'tt'), ('r', 'r', 'rr')]:
+                            src_x = f'{r}-{suffixe_src}X'; src_y = f'{r}-{suffixe_src}Y'
+                            autre_x = f'{autre}-{suffixe_autre}X'; autre_y = f'{autre}-{suffixe_autre}Y'
+                            if not all(c in df.columns for c in (src_x, src_y, autre_x, autre_y)):
+                                continue
+                            dx = df[src_x].shift(-pas_direction//2) - df[src_x].shift(pas_direction//2)
+                            dy = df[src_y].shift(-pas_direction//2) - df[src_y].shift(pas_direction//2)
+                            ux = df[autre_x] - df[src_x]
+                            uy = df[autre_y] - df[src_y]
+                            norme = np.sqrt(ux**2 + uy**2)
+                            df[f'projection_ortho_{r}_{tag}'] = (dx*ux + dy*uy) / (norme + 1e-9)
+                        if f'projection_ortho_{r}_tt' in df.columns and f'projection_ortho_{r}_rr' in df.columns:
+                            df[f'dif_proj_{r}'] = df[f'projection_ortho_{r}_tt'] - df[f'projection_ortho_{r}_rr']
 
                 idx_ruptures, idx_reprises = detecter_ruptures_contact(
                     df, 'contact_AB', col_temps='temps_relatif_ms')
@@ -104,6 +121,8 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_lst, projectio
                                 col_v = f'vitesse_A_vers_B_{pos}' if r == 'A' else f'vitesse_B_vers_A_{pos}'
                                 col_x = f'{r}-{pos[0]}X'
                                 col_y = f'{r}-{pos[0]}Y'
+                                col_proj = f'projection_ortho_{r}_{pos}'
+                                col_dif = f'dif_proj_{r}'
                                 if any(c not in df.columns for c in (col_acc, col_v, col_x, col_y)):
                                     continue
 
@@ -132,6 +151,7 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_lst, projectio
 
                                     if cle not in bruts:
                                         bruts[cle] = {'temps': [], 'acc': [], 'v': [],
+                                                      'proj': [], 'dif': [],
                                                       'x': [], 'y': [],
                                                       'deux_prochains': []}
                                     n_f = len(fenetre)
@@ -139,6 +159,12 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_lst, projectio
                                     bruts[cle]['temps'].append(t_rel)
                                     bruts[cle]['acc'].append(fenetre[col_acc].values)
                                     bruts[cle]['v'].append(fenetre[col_v].values)
+                                    bruts[cle]['proj'].append(
+                                        fenetre[col_proj].values if col_proj in fenetre.columns
+                                        else np.full(n_f, np.nan))
+                                    bruts[cle]['dif'].append(
+                                        fenetre[col_dif].values if col_dif in fenetre.columns
+                                        else np.full(n_f, np.nan))
                                     bruts[cle]['x'].append(fenetre[col_x].values)
                                     bruts[cle]['y'].append(fenetre[col_y].values)
                                     bruts[cle]['deux_prochains'].append(deux_prochains)
@@ -159,6 +185,8 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_lst, projectio
                             col_v = f'vitesse_A_vers_B_{pos}' if r == 'A' else f'vitesse_B_vers_A_{pos}'
                             col_x = f'{r}-{pos[0]}X'
                             col_y = f'{r}-{pos[0]}Y'
+                            col_proj = f'projection_ortho_{r}_{pos}'
+                            col_dif = f'dif_proj_{r}'
                             if col_v not in df.columns:
                                 continue
 
@@ -171,11 +199,14 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_lst, projectio
 
                             if cle not in bruts:
                                 bruts[cle] = {'temps': [], 'acc': [], 'v': [],
+                                              'proj': [], 'dif': [],
                                               'x': [], 'y': [],
                                               'ruptures': [], 'reprises': []}
                             bruts[cle]['temps'].append(temps)
                             bruts[cle]['acc'].append(df[col_acc].to_numpy() if col_acc in df.columns else np.full(len(df), np.nan))
                             bruts[cle]['v'].append(df[col_v].to_numpy())
+                            bruts[cle]['proj'].append(df[col_proj].to_numpy() if col_proj in df.columns else np.full(len(df), np.nan))
+                            bruts[cle]['dif'].append(df[col_dif].to_numpy() if col_dif in df.columns else np.full(len(df), np.nan))
                             bruts[cle]['x'].append(df[col_x].to_numpy() if col_x in df.columns else np.full(len(df), np.nan))
                             bruts[cle]['y'].append(df[col_y].to_numpy() if col_y in df.columns else np.full(len(df), np.nan))
                             bruts[cle]['ruptures'].append(temps[idx_rup])
@@ -199,6 +230,8 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_lst, projectio
         temps_moy, _ = _moy_sem(d['temps'])
         acc_moy, acc_sem = _moy_sem(d['acc'])
         v_moy, v_sem = _moy_sem(d['v'])
+        proj_moy, proj_sem = _moy_sem(d['proj'])
+        dif_moy, dif_sem = _moy_sem(d['dif'])
         x_moy, x_sem = _moy_sem(d['x'])
         y_moy, y_sem = _moy_sem(d['y'])
 
@@ -206,6 +239,8 @@ def calculer_moyennes(taches_lst, conditions_par_tache, positions_lst, projectio
             'temps': temps_moy,
             'acc_moy': acc_moy, 'acc_sem': acc_sem,
             'v_moy': v_moy, 'v_sem': v_sem,
+            'proj_moy': proj_moy, 'proj_sem': proj_sem,
+            'dif_moy': dif_moy, 'dif_sem': dif_sem,
             'x_moy': x_moy, 'x_sem': x_sem,
             'y_moy': y_moy, 'y_sem': y_sem,
             'n': len(d['acc']),
@@ -459,7 +494,7 @@ else:
         palette = [plt.cm.turbo(x) for x in np.linspace(0, 1, len(cles_triees))]
     couleurs = {cle: palette[i] for i, cle in enumerate(cles_triees)}
 
-    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(14, 20), sharex=True)
+    fig, (ax1, ax2, ax3, ax4, ax5, ax6) = plt.subplots(6, 1, figsize=(14, 26), sharex=True)
 
     for cle in cles_triees:
         d = donnees[cle]
@@ -467,25 +502,30 @@ else:
         label = traduire(cle)
         n = d['n']
         temps = d['temps']
-
+    
         if lisse:
-            for k in ['acc_moy', 'v_moy', 'x_moy', 'y_moy',
-                      'acc_sem', 'v_sem', 'x_sem', 'y_sem']:
+            for k in ['acc_moy', 'v_moy', 'proj_moy', 'dif_moy', 'x_moy', 'y_moy',
+                      'acc_sem', 'v_sem', 'proj_sem', 'dif_sem', 'x_sem', 'y_sem']:
                 d[k] = lisser(d[k])
-
+    
         ls = '--' if 'Souris-Souris' in label else '-'
-
+    
         ax1.plot(temps, d['acc_moy'], color=couleur, linewidth=2, linestyle=ls, label=f'{label} (n={n})')
         ax2.plot(temps, d['v_moy'], color=couleur, linewidth=2, linestyle=ls)
-        ax3.plot(temps, d['x_moy'], color=couleur, linewidth=2, linestyle=ls)
-        ax4.plot(temps, d['y_moy'], color=couleur, linewidth=2, linestyle=ls)
-
+        ax3.plot(temps, d['proj_moy'], color=couleur, linewidth=2, linestyle=ls)
+        ax4.plot(temps, d['dif_moy'], color=couleur, linewidth=2, linestyle=ls)
+        ax5.plot(temps, d['x_moy'], color=couleur, linewidth=2, linestyle=ls)
+        ax6.plot(temps, d['y_moy'], color=couleur, linewidth=2, linestyle=ls)
+    
         ax1.fill_between(temps, d['acc_moy'] - d['acc_sem'], d['acc_moy'] + d['acc_sem'], color=couleur, alpha=0.15)
         ax2.fill_between(temps, d['v_moy'] - d['v_sem'], d['v_moy'] + d['v_sem'], color=couleur, alpha=0.15)
-        ax3.fill_between(temps, d['x_moy'] - d['x_sem'], d['x_moy'] + d['x_sem'], color=couleur, alpha=0.15)
-        ax4.fill_between(temps, d['y_moy'] - d['y_sem'], d['y_moy'] + d['y_sem'], color=couleur, alpha=0.15)
-
-        if periode == 'Evenement' and d.get('deux_prochains'):
+        ax3.fill_between(temps, d['proj_moy'] - d['proj_sem'], d['proj_moy'] + d['proj_sem'], color=couleur, alpha=0.15)
+        ax4.fill_between(temps, d['dif_moy'] - d['dif_sem'], d['dif_moy'] + d['dif_sem'], color=couleur, alpha=0.15)
+        ax5.fill_between(temps, d['x_moy'] - d['x_sem'], d['x_moy'] + d['x_sem'], color=couleur, alpha=0.15)
+        ax6.fill_between(temps, d['y_moy'] - d['y_sem'], d['y_moy'] + d['y_sem'], color=couleur, alpha=0.15)
+    
+        # ← test sur prochains ajouté
+        if prochains and d.get('deux_prochains'):
             t1 = [t[0] for t in d['deux_prochains'] if t[0] is not None]
             t2 = [t[1] for t in d['deux_prochains'] if t[1] is not None]
             if t1:
@@ -496,49 +536,51 @@ else:
                 m2 = np.mean(t2)
                 for ax in (ax1, ax2):
                     ax.axvline(m2, color=couleur, linestyle=':', alpha=0.6, linewidth=1.5)
-
+    
+    # Lignes de référence
     if periode == 'Evenement':
         for ax in (ax1, ax2):
             ax.axvline(0, color='red', linestyle='--', alpha=1)
-    for ax in (ax1, ax2):
+    for ax in (ax1, ax2, ax3, ax4):
         ax.axhline(0, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
-    ax3.axhline(Config.ESPACE_X / 2, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
-    ax4.axhline(Config.ESPACE_Y / 2, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
-
+    ax5.axhline(Config.ESPACE_X / 2, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
+    ax6.axhline(Config.ESPACE_Y / 2, color='black', linestyle='-', alpha=0.5, linewidth=0.5)
+    
     if periode == 'Essai':
         for cle in cles_triees:
             d = donnees[cle]
             for t in (d.get('ruptures') or [[]])[0]:
-                for ax in (ax1, ax2, ax3, ax4):
+                for ax in (ax1, ax2, ax3, ax4, ax5, ax6):
                     ax.axvline(t, color='red', linestyle='--', alpha=0.3, linewidth=0.8)
             for t in (d.get('reprises') or [[]])[0]:
-                for ax in (ax1, ax2, ax3, ax4):
+                for ax in (ax1, ax2, ax3, ax4, ax5, ax6):
                     ax.axvline(t, color='green', linestyle='-', alpha=0.3, linewidth=0.8)
-
-    ax1.set_ylabel('Accélération (px/ms²)', fontsize=12)
-    ax1.set_title('Accélération', fontsize=13); ax1.legend(loc='upper right', fontsize=12)
-    ax2.set_ylabel('Vitesse signée (px/ms)', fontsize=12)
-    ax2.set_title('Vitesse signée', fontsize=13); ax2.legend(loc='upper right', fontsize=12)
-    ax3.set_ylabel('Position x (px)', fontsize=12)
-    ax3.set_title('Position x', fontsize=13); ax3.legend(loc='upper right', fontsize=12)
-    ax4.set_ylabel('Position y (px)', fontsize=12)
-    ax4.set_xlabel('Temps relatif (ms)' if periode == 'Evenement' else 'Temps (ms)', fontsize=12)
-    ax4.set_title('Position y', fontsize=13); ax4.legend(loc='upper right', fontsize=12)
-
-    for ax in (ax1, ax2, ax3, ax4):
+    
+    # Labels
+    ax1.set_ylabel('Accélération (px/ms²)', fontsize=12); ax1.set_title('Accélération', fontsize=13); ax1.legend(loc='upper right', fontsize=12)
+    ax2.set_ylabel('Vitesse signée (px/ms)', fontsize=12); ax2.set_title('Vitesse signée', fontsize=13); ax2.legend(loc='upper right', fontsize=12)
+    ax3.set_ylabel('Projection (px)', fontsize=12); ax3.set_title('Projection orthogonale', fontsize=13); ax3.legend(loc='upper right', fontsize=12)
+    ax4.set_ylabel('Différence (px)', fontsize=12); ax4.set_title('Différence projections souris/curseur', fontsize=13); ax4.legend(loc='upper right', fontsize=12)
+    ax5.set_ylabel('Position x (px)', fontsize=12); ax5.set_title('Position x', fontsize=13); ax5.legend(loc='upper right', fontsize=12)
+    ax6.set_ylabel('Position y (px)', fontsize=12); ax6.set_title('Position y', fontsize=13); ax6.legend(loc='upper right', fontsize=12)
+    ax6.set_xlabel('Temps relatif (ms)' if periode == 'Evenement' else 'Temps (ms)', fontsize=12)
+    
+    for ax in (ax1, ax2, ax3, ax4, ax5, ax6):
         ax.grid(True, alpha=0.3)
-
+    
     def ajuster_limites(ax, centre, marge=0.05):
         ymin, ymax = ax.get_ylim()
         demi = max(centre - ymin, ymax - centre)
         if demi == 0: demi = 1
         demi *= (1 + marge)
         ax.set_ylim(centre - demi, centre + demi)
-
+    
     ajuster_limites(ax1, 0)
     ajuster_limites(ax2, 0)
-    ajuster_limites(ax3, Config.ESPACE_X / 2)
-    ajuster_limites(ax4, Config.ESPACE_Y / 2)
+    ajuster_limites(ax3, 0)
+    ajuster_limites(ax4, 0)
+    ajuster_limites(ax5, Config.ESPACE_X / 2)
+    ajuster_limites(ax6, Config.ESPACE_Y / 2)
 
     plt.tight_layout()
     st.pyplot(fig, width="stretch")
