@@ -3,18 +3,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 import json
-
-
-# CONFIGURATION
-
-class Config:
-    CACHE_ROOT = Path("GSV/caches")
-    OUTPUT_DIR = Path("caches")
-    CONDITIONS = ['BB', 'BH', 'HB', 'HH']
-    POSITIONS = ['tt', 'rt', 'tr', 'rr']
-    PAS_DIRECTION = 20  # 200 ms
-    DT_MS = 10
-
+from config import Config
 
 
 # CALCUL DES MÉTRIQUES
